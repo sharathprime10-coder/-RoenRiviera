@@ -1,10 +1,11 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional, Literal
+import re
 
 class ChatRequest(BaseModel):
-    message: str
+    message: str = Field(..., min_length=1, max_length=1000, description="The user's query.")
     workflow: Literal["syllabus_rag", "campus_faq", "timetable"]
-    conversation_id: Optional[str] = None
+    conversation_id: Optional[str] = Field(None, max_length=36)
 
 class SourceItem(BaseModel):
     document_id: str
