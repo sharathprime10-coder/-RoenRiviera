@@ -1,0 +1,111 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+@import 'tailwindcss';
+
+@theme inline {
+  --color-background: #15110E;
+  --color-foreground: #F4E8DB;
+  --color-card: #281D17;
+  --color-card-foreground: #F4E8DB;
+  --color-primary: #C56F43;
+  --color-primary-foreground: #FFFFFF;
+  --color-secondary: #3D2B20;
+  --color-secondary-foreground: #E1D4C2;
+  --color-muted: #281D17;
+  --color-muted-foreground: #BBA99B;
+  --color-accent: #EBAA62;
+  --color-accent-foreground: #15110E;
+  --color-border: #3D2B20;
+
+  --font-sans: 'Inter', sans-serif;
+  --font-display: 'Plus Jakarta Sans', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: var(--font-sans);
+}
+
+/* Galaxy Motion Background */
+.galaxy-bg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  z-index: -1;
+  background: radial-gradient(ellipse at bottom, #281D17 0%, #15110E 100%);
+}
+
+.stars {
+  position: absolute;
+  width: 2px;
+  height: 2px;
+  background: transparent;
+  animation: animStar 50s linear infinite;
+}
+
+@keyframes animStar {
+  from {
+    transform: translateY(0px);
+  }
+  to {
+    transform: translateY(-2000px);
+  }
+}
+
+@keyframes orbital-spin {
+  0% { transform: rotate(0deg) scale(1); }
+  50% { transform: rotate(180deg) scale(1.05); }
+  100% { transform: rotate(360deg) scale(1); }
+}
+
+@keyframes orbital-spin-reverse {
+  0% { transform: rotate(360deg) scale(1); }
+  50% { transform: rotate(180deg) scale(0.95); }
+  100% { transform: rotate(0deg) scale(1); }
+}
+
+@keyframes particle-float {
+  0% { transform: translateY(0) scale(1); opacity: 0; }
+  50% { opacity: 1; }
+  100% { transform: translateY(-20px) scale(0); opacity: 0; }
+}
+
+
+/* Logo Animations */
+.atom-spin {
+  transform-origin: 60px 40px;
+  animation: atom-spin 15s linear infinite;
+}
+.wave-float-1 {
+  animation: wave-float-1 4s ease-in-out infinite;
+}
+.wave-float-2 {
+  animation: wave-float-2 3.5s ease-in-out infinite alternate;
+}
+.wave-float-3 {
+  animation: wave-float-3 4.5s ease-in-out infinite alternate;
+}
+
+@keyframes atom-spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+@keyframes wave-float-1 {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-3px); }
+}
+@keyframes wave-float-2 {
+  0%, 100% { transform: translateY(0px) translateX(0px); }
+  50% { transform: translateY(2px) translateX(-1px); }
+}
+@keyframes wave-float-3 {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-2px); }
+}
