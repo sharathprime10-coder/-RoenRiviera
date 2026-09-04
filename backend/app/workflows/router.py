@@ -1,6 +1,8 @@
 from app.schemas.chat import ChatRequest, ChatResponse, ChatMetadata, SourceItem
 from app.rag.llm import generate_rag_response
 from app.rag.grounding import check_evidence_sufficiency, map_citations
+from app.workflows.timetable import check_timetable_conflict
+from app.workflows.faq import execute_campus_faq
 import uuid
 
 async def route_workflow(request: ChatRequest) -> ChatResponse:
@@ -13,7 +15,8 @@ async def route_workflow(request: ChatRequest) -> ChatResponse:
     elif request.workflow == "campus_faq":
         return await execute_campus_faq(request, conv_id)
     elif request.workflow == "timetable":
-        return await execute_timetable(request, conv_id)
+        # Hardcoding a dummy user_id for the hackathon version
+        return await check_timetable_conflict(request.message, "user_123", conv_id)
     else:
         # Fallback for unknown workflow
         return ChatResponse(
@@ -63,24 +66,4 @@ async def execute_syllabus_rag(request: ChatRequest, conv_id: str) -> ChatRespon
         metadata=ChatMetadata(retrieval_count=len(mock_retrieved_chunks), latency_ms=150)
     )
 
-async def execute_campus_faq(request: ChatRequest, conv_id: str) -> ChatResponse:
-    return ChatResponse(
-        conversation_id=conv_id,
-        workflow="campus_faq",
-        answer="This is a mock answer from the Campus FAQ workflow. Backend integration is in progress.",
-        grounded=True,
-        confidence="high",
-        sources=[],
-        metadata=ChatMetadata(retrieval_count=0, latency_ms=10)
-    )
 
-async def execute_timetable(request: ChatRequest, conv_id: str) -> ChatResponse:
-    return ChatResponse(
-        conversation_id=conv_id,
-        workflow="timetable",
-        answer="This is a mock answer from the Timetable workflow. Conflict check pending.",
-        grounded=True,
-        confidence="high",
-        sources=[],
-        metadata=ChatMetadata(retrieval_count=0, latency_ms=10)
-    )
