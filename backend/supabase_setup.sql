@@ -6,12 +6,12 @@ create table documents (
   id uuid primary key default uuid_generate_v4(),
   content text,               -- corresponds to Document.page_content
   metadata jsonb,             -- corresponds to Document.metadata
-  embedding vector(768)       -- 768 works for Gemini text-embedding-004 and text-embedding-004 models
+  embedding vector(384)       -- 384 works for smaller embedding models
 );
 
 -- Create a function to search for documents
 create function match_documents (
-  query_embedding vector(768),
+  query_embedding vector(384),
   match_count int DEFAULT null,
   filter jsonb DEFAULT '{}'
 ) returns table (

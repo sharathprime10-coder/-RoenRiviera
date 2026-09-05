@@ -17,16 +17,8 @@ def get_supabase_client() -> Client:
 
 def get_embeddings():
     """
-    Returns the initialized Gemini Embeddings model.
+    Initialize local FastEmbed Embeddings.
+    This runs completely locally and generates 384-dimensional vectors.
     """
-    from langchain_google_genai import GoogleGenerativeAIEmbeddings
-    
-    api_key = settings.GEMINI_API_KEY
-    if not api_key:
-        raise ValueError("GEMINI_API_KEY is not set in environment variables.")
-        
-    # We use text-embedding-004 which outputs 768-dimensional vectors
-    return GoogleGenerativeAIEmbeddings(
-        model="models/text-embedding-004",
-        google_api_key=api_key
-    )
+    from langchain_community.embeddings.fastembed import FastEmbedEmbeddings
+    return FastEmbedEmbeddings(model_name="BAAI/bge-small-en-v1.5")

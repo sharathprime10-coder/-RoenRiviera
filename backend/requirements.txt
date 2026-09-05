@@ -16,3 +16,4 @@ langgraph
 openai
 langchain-google-genai
 langchain-community
+fastembed
