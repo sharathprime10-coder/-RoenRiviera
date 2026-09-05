@@ -17,6 +17,8 @@ from typing import AsyncGenerator
 
 from app.core.config import settings
 from app.rag.llm import classify_query
+from app.api.deps import verify_token
+from app.core.rate_limit import check_user_rate_limit
 
 router = APIRouter()
 
@@ -112,7 +114,11 @@ async def _voice_complex_response(text: str) -> str:
 # ──────────────────────────────────────────────────────────────────────
 
 @router.post("/speak")
-async def generate_speech(request: VoiceRequest):
+async def generate_speech(
+    request: VoiceRequest,
+    current_user: dict = Depends(verify_token),
+    rate_limit: dict = Depends(check_user_rate_limit)
+):
     try:
         if not request.text:
             raise HTTPException(status_code=400, detail="Text is required")
@@ -126,7 +132,11 @@ async def generate_speech(request: VoiceRequest):
 
 
 @router.post("/process")
-async def process_voice_query(request: VoiceRequest):
+async def process_voice_query(
+    request: VoiceRequest,
+    current_user: dict = Depends(verify_token),
+    rate_limit: dict = Depends(check_user_rate_limit)
+):
     """
     Process a voice query with intelligent routing:
     - Simple queries → dedicated OpenRouter key (fast, low latency)

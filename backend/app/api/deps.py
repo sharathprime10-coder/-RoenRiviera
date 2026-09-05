@@ -18,12 +18,8 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    # Stub: For hackathon demo, we accept any token unless strict auth is needed.
-    # In production:
-    # try:
-    #     payload = jwt.decode(token, settings.SUPABASE_JWT_SECRET, algorithms=["HS256"], audience="authenticated")
-    #     return payload
-    # except jwt.PyJWTError:
-    #     raise HTTPException(status_code=401, detail="Invalid token")
-    
-    return {"sub": "user_123", "role": "authenticated"}
+    try:
+        payload = jwt.decode(token, settings.SUPABASE_JWT_SECRET, algorithms=["HS256"], audience="authenticated")
+        return payload
+    except jwt.PyJWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
