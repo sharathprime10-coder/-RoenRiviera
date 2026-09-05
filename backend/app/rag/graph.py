@@ -59,62 +59,47 @@ def _get_groq_llm() -> ChatGroq:
 
 def retrieve_context(state: RAGState) -> dict:
     """
-    Retrieve relevant document chunks for the user query.
-    Currently returns mock data; in production this would call
-    a vector store (Supabase pgvector, Pinecone, etc.).
+    Retrieve relevant document chunks for the user query using Supabase pgvector.
     """
     start = time.time()
+    query = state["query"]
 
-    query_lower = state["query"].lower()
+    from app.core.db import get_supabase_client, get_embeddings
+    from langchain_community.vectorstores import SupabaseVectorStore
+    
+    try:
+        # Initialize Supabase client and Embeddings model
+        supabase = get_supabase_client()
+        embeddings = get_embeddings()
+        
+        # Create VectorStore instance
+        vector_store = SupabaseVectorStore(
+            client=supabase,
+            embedding=embeddings,
+            table_name="documents",
+            query_name="match_documents"
+        )
+        
+        # Perform similarity search (get top 3 chunks)
+        docs = vector_store.similarity_search(query, k=3)
+        
+        # Format the retrieved documents into chunks
+        chunks = []
+        for i, doc in enumerate(docs):
+            chunks.append({
+                "document_id": doc.metadata.get("document_id", f"doc_{i}"),
+                "document_name": doc.metadata.get("document_name", "Unknown Source"),
+                "content": doc.page_content,
+                "page": doc.metadata.get("page", None),
+                "section": doc.metadata.get("section", None),
+            })
+            
+    except Exception as e:
+        print(f"[RAG] Supabase retrieval failed: {e}")
+        # Fallback to empty if DB fails
+        chunks = []
 
-    # -- Mock retrieval logic (replace with real vector search) --
-    if any(kw in query_lower for kw in ["syllabus", "course", "curriculum", "subject", "module"]):
-        chunks = [
-            {
-                "document_id": "doc_cs101",
-                "document_name": "CS101 Syllabus",
-                "content": "CS101 covers Data Structures, Algorithms, and OOP. The midterm exam is on October 15th. The final exam covers all modules including Graph Theory and Dynamic Programming.",
-                "page": 1,
-                "section": "Course Overview",
-            },
-            {
-                "document_id": "doc_cs101",
-                "document_name": "CS101 Syllabus",
-                "content": "Module 1: Arrays & Linked Lists. Module 2: Stacks & Queues. Module 3: Trees & Graphs. Module 4: Sorting & Searching. Module 5: Dynamic Programming.",
-                "page": 2,
-                "section": "Module Breakdown",
-            },
-        ]
-    elif any(kw in query_lower for kw in ["library", "campus", "facility", "hours", "contact", "office"]):
-        chunks = [
-            {
-                "document_id": "faq_001",
-                "document_name": "Campus Policies",
-                "content": "Library hours are 8 AM to 10 PM daily. The student services office is open from 9 AM to 5 PM on weekdays. The campus gym is open from 6 AM to 9 PM.",
-                "section": "Facilities",
-            },
-        ]
-    elif any(kw in query_lower for kw in ["summarize", "summary", "explain", "describe"]):
-        chunks = [
-            {
-                "document_id": "doc_cs101",
-                "document_name": "CS101 Syllabus",
-                "content": "CS101 covers Data Structures, Algorithms, and OOP. The midterm exam is on October 15th. The final exam covers all modules including Graph Theory and Dynamic Programming. Prerequisites: Basic programming in any language.",
-                "page": 1,
-                "section": "Course Overview",
-            },
-        ]
-    else:
-        chunks = [
-            {
-                "document_id": "faq_general",
-                "document_name": "General Campus Info",
-                "content": "RoenRiviera University offers over 50 undergraduate programs. The campus is located in a 200-acre green zone with modern facilities.",
-                "section": "About",
-            },
-        ]
-
-    context_text = "\n\n".join(c["content"] for c in chunks)
+    context_text = "\n\n".join(c["content"] for c in chunks) if chunks else "No relevant information found."
     elapsed = int((time.time() - start) * 1000)
 
     return {
