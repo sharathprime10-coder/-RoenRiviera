@@ -2,8 +2,6 @@
 
 An intelligent, centralized campus platform designed to connect students with their educational materials, schedules, and peers seamlessly. Riviera combines an intuitive glassmorphic interface with a robust AI-powered backend to deliver real-time insights, natural voice interactions, and deep document understanding.
 
-![Architecture Design](./docs/architecture.jpg)
-
 ## Core Features
 
 *   **Intelligent Knowledge Base**: Upload syllabi, notes, and official documents. Our Retrieval-Augmented Generation (RAG) pipeline indexes your materials for instantaneous query resolution.
