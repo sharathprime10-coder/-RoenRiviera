@@ -3,7 +3,6 @@ Timetable workflow — conflict detection via LangGraph / Groq.
 """
 
 import time
-from typing import List, Dict, Any
 from app.schemas.chat import ChatResponse, ChatMetadata
 
 
@@ -44,11 +43,9 @@ async def check_timetable_conflict(query: str, user_id: str, conv_id: str) -> Ch
         print(f"[WORKFLOW] LangGraph timetable failed: {e}. Falling back to deterministic stub.")
 
         # ── Deterministic fallback ──
-        has_conflict = False
         mock_answer = "No schedule conflicts detected for your query."
 
         if "monday" in query.lower() and "morning" in query.lower():
-            has_conflict = True
             mock_answer = "Conflict detected: You have CS101 and MA102 scheduled at 10:00 AM on Monday."
 
         elapsed = int((time.time() - start) * 1000)

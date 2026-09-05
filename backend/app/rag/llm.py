@@ -10,9 +10,7 @@ classifier later without changing the rest of the pipeline.
 """
 
 import re
-import time
 import httpx
-from typing import Optional, Dict, Any, List
 from app.core.config import settings
 from google import genai
 from google.genai import types
