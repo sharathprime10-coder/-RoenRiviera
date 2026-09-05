@@ -6,7 +6,7 @@ import time
 from app.schemas.chat import ChatResponse, ChatMetadata
 
 
-async def check_timetable_conflict(query: str, user_id: str, conv_id: str) -> ChatResponse:
+async def check_timetable_conflict(query: str, user_id: str, conv_id: str, sassy: bool = False) -> ChatResponse:
     """
     Execute the timetable conflict-detection workflow via LangGraph.
     Falls back to the deterministic stub if the graph is unavailable.
@@ -23,6 +23,7 @@ async def check_timetable_conflict(query: str, user_id: str, conv_id: str) -> Ch
             "has_conflict": False,
             "answer": "",
             "latency_ms": 0,
+            "sassy": sassy,
         }
 
         print(f"[WORKFLOW] Timetable -> LangGraph/Groq for: {query[:60]}...")

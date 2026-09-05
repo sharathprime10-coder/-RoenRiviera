@@ -26,6 +26,7 @@ async def execute_campus_faq(request: ChatRequest, conv_id: str) -> ChatResponse
             "answer": "",
             "grounded": False,
             "latency_ms": 0,
+            "sassy": request.sassy,
         }
 
         print(f"[WORKFLOW] Campus FAQ -> LangGraph/Groq for: {request.message[:60]}...")
@@ -77,7 +78,7 @@ async def execute_campus_faq(request: ChatRequest, conv_id: str) -> ChatResponse
             )
 
         context = "\n".join([chunk["content"] for chunk in mock_retrieved_chunks])
-        llm_answer = await generate_rag_response(request.message, context)
+        llm_answer = await generate_rag_response(request.message, context, request.sassy)
         is_grounded, sources = map_citations(llm_answer, mock_retrieved_chunks)
         elapsed = int((time.time() - start) * 1000)
 

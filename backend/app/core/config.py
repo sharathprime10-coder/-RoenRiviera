@@ -22,6 +22,12 @@ class Settings(BaseSettings):
     # Voice Assistant - using the unified OpenRouter key
     VOICE_OPENROUTER_MODEL: str = "google/gemini-2.5-flash-lite"
 
+    # Deployment
+    ENVIRONMENT: str = "development"
+    # Comma-separated extra allowed CORS origins (env vars can't hold lists directly).
+    # The hardcoded fallback list in main.py is always included; this only adds to it.
+    ALLOWED_ORIGINS: str = ""
+
     model_config = SettingsConfigDict(env_file=".env", env_ignore_empty=True, extra="ignore")
 
 settings = Settings()

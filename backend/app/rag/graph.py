@@ -13,6 +13,7 @@ from langchain_groq import ChatGroq
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.graph import StateGraph, END
 from app.core.config import settings
+from app.core.personality import get_system_prompt_suffix
 
 
 # ---------------------------------------------------------------------------
@@ -28,6 +29,7 @@ class RAGState(TypedDict):
     grounded: bool
     latency_ms: int
     memory_context: str
+    sassy: bool
 
 
 class TimetableState(TypedDict):
@@ -38,6 +40,7 @@ class TimetableState(TypedDict):
     has_conflict: bool
     answer: str
     latency_ms: int
+    sassy: bool
 
 
 # ---------------------------------------------------------------------------
@@ -124,7 +127,7 @@ def generate_rag_answer(state: RAGState) -> dict:
         "If the context does not contain enough information, say so honestly. "
         "Be concise, helpful, and cite the relevant document when possible.\n\n"
         f"### Context\n{state['context_text']}"
-        f"{memory_note}"
+        f"{memory_note}" + get_system_prompt_suffix(state.get("sassy", False))
     )
 
     messages = [
@@ -208,7 +211,7 @@ def generate_timetable_answer(state: TimetableState) -> dict:
     system_prompt = (
         "You are River, the campus timetable assistant. "
         "Analyze the student's schedule and answer their question. "
-        "If there are conflicts, highlight them clearly.\n\n"
+        "If there are conflicts, highlight them clearly." + get_system_prompt_suffix(state.get("sassy", False)) + "\n\n"
         f"### Student Schedule\n{schedule_text}"
     )
     if conflict_note:

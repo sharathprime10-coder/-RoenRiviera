@@ -4,8 +4,9 @@ import re
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1, max_length=1000, description="The user's query.")
-    workflow: Literal["syllabus_rag", "campus_faq", "timetable", "chitchat"]
+    workflow: Literal["syllabus_rag", "campus_faq", "timetable", "chitchat", "auto"]
     conversation_id: Optional[str] = Field(None, max_length=36)
+    sassy: bool = False
 
 class SourceItem(BaseModel):
     document_id: str

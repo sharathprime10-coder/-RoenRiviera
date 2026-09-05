@@ -41,7 +41,8 @@ async def route_workflow_stream(request: ChatRequest) -> AsyncGenerator[str, Non
             "answer": "",
             "grounded": False,
             "latency_ms": 0,
-            "memory_context": memory_context
+            "memory_context": memory_context,
+            "sassy": request.sassy,
         }
         
         full_answer = ""
@@ -95,7 +96,7 @@ async def route_workflow(request: ChatRequest) -> ChatResponse:
         response = await execute_campus_faq(request, conv_id)
     elif workflow == "timetable":
         # TODO: extract real user_id from JWT payload
-        response = await check_timetable_conflict(request.message, "user_123", conv_id)
+        response = await check_timetable_conflict(request.message, "user_123", conv_id, request.sassy)
     elif workflow == "chitchat" or workflow == "simple_chat":
         response = await execute_simple_chat(request, conv_id)
     else:
@@ -124,7 +125,7 @@ async def execute_simple_chat(request: ChatRequest, conv_id: str) -> ChatRespons
     start = time.time()
     try:
         # Reuse the dedicated simple LLM from voice (OpenRouter)
-        answer = await _voice_simple_response(request.message)
+        answer = await _voice_simple_response(request.message, request.sassy)
         elapsed = int((time.time() - start) * 1000)
         return ChatResponse(
             conversation_id=conv_id,
@@ -165,7 +166,8 @@ async def execute_syllabus_rag(request: ChatRequest, conv_id: str, memory_contex
             "answer": "",
             "grounded": False,
             "latency_ms": 0,
-            "memory_context": memory_context
+            "memory_context": memory_context,
+            "sassy": request.sassy,
         }
 
         print(f"[WORKFLOW] Syllabus RAG -> LangGraph/Groq for: {request.message[:60]}...")
@@ -217,7 +219,7 @@ async def execute_syllabus_rag(request: ChatRequest, conv_id: str, memory_contex
             )
 
         context = "\n".join([chunk["content"] for chunk in mock_retrieved_chunks])
-        llm_answer = await generate_rag_response(request.message, context)
+        llm_answer = await generate_rag_response(request.message, context, request.sassy)
         is_grounded, sources = map_citations(llm_answer, mock_retrieved_chunks)
         elapsed = int((time.time() - start) * 1000)
 

@@ -19,6 +19,7 @@ from app.core.config import settings
 from app.rag.llm import classify_query
 from app.api.deps import verify_token
 from app.core.rate_limit import check_user_rate_limit
+from app.core.personality import get_system_prompt_suffix
 
 router = APIRouter()
 
@@ -26,14 +27,16 @@ router = APIRouter()
 class VoiceRequest(BaseModel):
     text: str
     voice_id: str = "en-US-AriaNeural"  # Default voice
+    rate: str = "+0%"
+    sassy: bool = False
 
 
 # ──────────────────────────────────────────────────────────────────────
 # TTS streaming
 # ──────────────────────────────────────────────────────────────────────
 
-async def generate_audio_stream(text: str, voice_id: str) -> AsyncGenerator[bytes, None]:
-    communicate = edge_tts.Communicate(text, voice_id)
+async def generate_audio_stream(text: str, voice_id: str, rate: str = "+0%") -> AsyncGenerator[bytes, None]:
+    communicate = edge_tts.Communicate(text, voice_id, rate=rate)
     async for chunk in communicate.stream():
         if chunk["type"] == "audio":
             yield chunk["data"]
@@ -43,7 +46,7 @@ async def generate_audio_stream(text: str, voice_id: str) -> AsyncGenerator[byte
 # Dedicated Voice LLM — uses its own OpenRouter API key
 # ──────────────────────────────────────────────────────────────────────
 
-async def _voice_simple_response(text: str) -> str:
+async def _voice_simple_response(text: str, sassy: bool = False) -> str:
     """
     Handle simple / conversational voice queries via the dedicated
     OpenRouter key — completely isolated from the text-chat pipeline.
@@ -65,7 +68,7 @@ async def _voice_simple_response(text: str) -> str:
                 "content": (
                     "You are River, a helpful, friendly AI campus assistant. "
                     "Keep your responses concise (1-3 sentences), "
-                    "conversational, and suitable for text-to-speech."
+                    "conversational, and suitable for text-to-speech." + get_system_prompt_suffix(sassy)
                 ),
             },
             {"role": "user", "content": text},
@@ -85,7 +88,7 @@ async def _voice_simple_response(text: str) -> str:
         return data["choices"][0]["message"]["content"]
 
 
-async def _voice_complex_response(text: str) -> str:
+async def _voice_complex_response(text: str, sassy: bool = False) -> str:
     """
     Handle complex voice queries (campus data, RAG) via Groq / LangGraph.
     """
@@ -99,6 +102,7 @@ async def _voice_complex_response(text: str) -> str:
             "answer": "",
             "grounded": False,
             "latency_ms": 0,
+            "sassy": sassy,
         }
 
         result = rag_graph.invoke(initial_state)
@@ -106,12 +110,33 @@ async def _voice_complex_response(text: str) -> str:
 
     except Exception as e:
         print(f"[VOICE] LangGraph failed: {e}. Falling back to OpenRouter.")
-        return await _voice_simple_response(text)
+        return await _voice_simple_response(text, sassy)
 
 
 # ──────────────────────────────────────────────────────────────────────
 # Endpoints
 # ──────────────────────────────────────────────────────────────────────
+
+@router.get("/voices")
+async def get_voices():
+    """
+    Fetch live list of voices from edge-tts.
+    """
+    try:
+        voices = await edge_tts.list_voices()
+        simplified = [
+            {
+                "short_name": v["ShortName"],
+                "friendly_name": v["FriendlyName"],
+                "locale": v["Locale"],
+                "gender": v["Gender"],
+            }
+            for v in voices
+        ]
+        return {"voices": simplified}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @router.post("/speak")
 async def generate_speech(
@@ -124,7 +149,7 @@ async def generate_speech(
             raise HTTPException(status_code=400, detail="Text is required")
             
         return StreamingResponse(
-            generate_audio_stream(request.text, request.voice_id), 
+            generate_audio_stream(request.text, request.voice_id, request.rate), 
             media_type="audio/mpeg"
         )
     except Exception as e:
@@ -151,13 +176,13 @@ async def process_voice_query(
         print(f"[VOICE] Query classified as '{classification}': {request.text[:80]}...")
 
         if classification == "simple":
-            llm_answer = await _voice_simple_response(request.text)
+            llm_answer = await _voice_simple_response(request.text, request.sassy)
         else:
-            llm_answer = await _voice_complex_response(request.text)
+            llm_answer = await _voice_complex_response(request.text, request.sassy)
 
         # Stream audio back
         return StreamingResponse(
-            generate_audio_stream(llm_answer, request.voice_id),
+            generate_audio_stream(llm_answer, request.voice_id, request.rate),
             media_type="audio/mpeg",
         )
 

@@ -106,6 +106,7 @@ async def upload_document(
         
         docs = []
         doc_id = str(uuid.uuid4())
+        user_id = current_user.get("sub")
         
         for i, para in enumerate(paragraphs):
             # Only index chunks that have some length to avoid garbage tokens
@@ -116,7 +117,8 @@ async def upload_document(
                         metadata={
                             "document_id": doc_id,
                             "document_name": file.filename,
-                            "section": f"Chunk {i+1}"
+                            "section": f"Chunk {i+1}",
+                            "user_id": user_id
                         }
                     )
                 )

@@ -14,6 +14,7 @@ import httpx
 from app.core.config import settings
 from google import genai
 from google.genai import types
+from app.core.personality import get_system_prompt_suffix
 
 
 # ──────────────────────────────────────────────────────────────────────
@@ -78,7 +79,7 @@ def classify_query(query: str) -> str:
 # ──────────────────────────────────────────────────────────────────────
 
 class LLMProvider:
-    async def generate_response(self, prompt: str, context: str) -> str:
+    async def generate_response(self, prompt: str, context: str, sassy: bool = False) -> str:
         raise NotImplementedError
 
 
@@ -88,11 +89,14 @@ class GeminiProvider(LLMProvider):
         self.client = genai.Client(api_key=settings.GEMINI_API_KEY)
         self.model_name = settings.GEMINI_MODEL
 
-    async def generate_response(self, prompt: str, context: str) -> str:
+    async def generate_response(self, prompt: str, context: str, sassy: bool = False) -> str:
         if not settings.GEMINI_API_KEY:
             return "Gemini API key not configured."
         
+        system_suffix = get_system_prompt_suffix(sassy)
         full_prompt = f"Context:\n{context}\n\nUser Query:\n{prompt}"
+        if system_suffix:
+            full_prompt = f"System Instruction: You are a helpful assistant.{system_suffix}\n\n{full_prompt}"
         response = self.client.models.generate_content(
             model=self.model_name,
             contents=full_prompt,
@@ -109,7 +113,7 @@ class GroqProvider(LLMProvider):
         self.model_name = settings.GROQ_MODEL
         self.url = "https://api.groq.com/openai/v1/chat/completions"
 
-    async def generate_response(self, prompt: str, context: str) -> str:
+    async def generate_response(self, prompt: str, context: str, sassy: bool = False) -> str:
         if not self.api_key:
             return "Groq API key not configured."
             
@@ -121,7 +125,7 @@ class GroqProvider(LLMProvider):
         payload = {
             "model": self.model_name,
             "messages": [
-                {"role": "system", "content": f"You are a helpful assistant answering based on this context: {context}"},
+                {"role": "system", "content": f"You are a helpful assistant answering based on this context: {context}" + get_system_prompt_suffix(sassy)},
                 {"role": "user", "content": prompt}
             ],
             "temperature": 0.0
@@ -138,17 +142,17 @@ class GroqProvider(LLMProvider):
 # Simple-path Gemini response (fast, low-latency)
 # ──────────────────────────────────────────────────────────────────────
 
-async def _simple_gemini_response(prompt: str, context: str) -> str:
+async def _simple_gemini_response(prompt: str, context: str, sassy: bool = False) -> str:
     """Handle simple / conversational queries via Gemini."""
     provider = GeminiProvider()
-    return await provider.generate_response(prompt, context)
+    return await provider.generate_response(prompt, context, sassy)
 
 
 # ──────────────────────────────────────────────────────────────────────
 # Complex-path LangGraph / Groq response
 # ──────────────────────────────────────────────────────────────────────
 
-async def _complex_groq_response(prompt: str, context: str) -> str:
+async def _complex_groq_response(prompt: str, context: str, sassy: bool = False) -> str:
     """
     Invoke the RAG LangGraph for complex queries.
     Falls back to raw GroqProvider if the graph raises.
@@ -163,6 +167,7 @@ async def _complex_groq_response(prompt: str, context: str) -> str:
             "answer": "",
             "grounded": False,
             "latency_ms": 0,
+            "sassy": sassy,
         }
 
         result = rag_graph.invoke(initial_state)
@@ -171,14 +176,14 @@ async def _complex_groq_response(prompt: str, context: str) -> str:
     except Exception as graph_err:
         print(f"[ROUTER] LangGraph RAG failed ({graph_err}), falling back to raw Groq")
         provider = GroqProvider()
-        return await provider.generate_response(prompt, context)
+        return await provider.generate_response(prompt, context, sassy)
 
 
 # ──────────────────────────────────────────────────────────────────────
 # Public API — drop-in replacement for the old generate_rag_response
 # ──────────────────────────────────────────────────────────────────────
 
-async def generate_rag_response(prompt: str, context: str) -> str:
+async def generate_rag_response(prompt: str, context: str, sassy: bool = False) -> str:
     """
     Primary LLM pipeline with intelligent routing + fallback support.
 
@@ -192,9 +197,9 @@ async def generate_rag_response(prompt: str, context: str) -> str:
 
     try:
         if classification == "simple":
-            return await _simple_gemini_response(prompt, context)
+            return await _simple_gemini_response(prompt, context, sassy)
         else:
-            return await _complex_groq_response(prompt, context)
+            return await _complex_groq_response(prompt, context, sassy)
 
     except Exception as primary_err:
         if settings.LLM_FALLBACK_ENABLED:
@@ -202,10 +207,10 @@ async def generate_rag_response(prompt: str, context: str) -> str:
             try:
                 if classification == "simple":
                     # Gemini failed → try Groq
-                    return await _complex_groq_response(prompt, context)
+                    return await _complex_groq_response(prompt, context, sassy)
                 else:
                     # Groq failed → try Gemini
-                    return await _simple_gemini_response(prompt, context)
+                    return await _simple_gemini_response(prompt, context, sassy)
             except Exception as fallback_err:
                 print(f"[ROUTER] Fallback also failed: {fallback_err}")
                 return "Service temporarily unavailable due to upstream LLM errors."

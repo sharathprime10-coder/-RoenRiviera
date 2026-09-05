@@ -1,17 +1,23 @@
+import { supabase } from '../lib/supabaseClient';
+
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000/api/v1";
 
-export const sendMessage = async (message: string, workflow: string) => {
+export const sendMessage = async (message: string, workflow: string, sassy: boolean = false) => {
   console.log(`Sending to backend [${workflow}]:`, message);
   try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token || "";
+
     const response = await fetch(`${API_URL}/chat/`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": "Bearer dummy_token"
+        "Authorization": `Bearer ${token}`
       },
       body: JSON.stringify({
         message,
         workflow,
+        sassy,
       }),
     });
     
@@ -34,19 +40,24 @@ export const sendMessage = async (message: string, workflow: string) => {
 export const streamMessage = async (
   message: string, 
   workflow: string, 
-  onChunk: (chunk: string) => void
+  onChunk: (chunk: string) => void,
+  sassy: boolean = false
 ) => {
   console.log(`Streaming from backend [${workflow}]:`, message);
   try {
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token || "";
+
     const response = await fetch(`${API_URL}/chat/stream`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "Authorization": "Bearer dummy_token"
+        "Authorization": `Bearer ${token}`
       },
       body: JSON.stringify({
         message,
         workflow,
+        sassy,
       }),
     });
     

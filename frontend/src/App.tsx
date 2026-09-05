@@ -3,6 +3,8 @@ import { BrowserRouter, Routes, Route, Link, useNavigate, useLocation } from 're
 import { Bot, Library, Calendar, ArrowRight, ArrowLeft, Clock, CheckCircle2, Mic, X, Search, FileText, Upload, Settings, MessageSquare, MessageCircle, User } from 'lucide-react';
 import { sendMessage, streamMessage } from './api/chat';
 import { uploadDocument } from './api/documents';
+import { supabase } from './lib/supabaseClient';
+import { VoiceSettings } from './components/VoiceSettings';
 
 const RoenLogo = ({ className = "h-8 w-auto" }: { className?: string }) => (
   <svg viewBox="0 0 160 100" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -82,11 +84,23 @@ const DesertGalaxy = () => {
   );
 };
 
-const VoiceAssistantOverlay = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) => {
+const VoiceAssistantOverlay = ({ isOpen, onClose, isSassy }: { isOpen: boolean; onClose: () => void, isSassy: boolean }) => {
   const [status, setStatus] = useState<'idle' | 'greeting' | 'listening' | 'processing' | 'speaking'>('idle');
   const [transcript, setTranscript] = useState('');
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [volume, setVolume] = useState(0);
+
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [voiceId, setVoiceId] = useState(() => localStorage.getItem('riviera_voice_id') || 'en-US-AriaNeural');
+  const [rate, setRate] = useState(() => localStorage.getItem('riviera_voice_rate') || '+0%');
+
+  useEffect(() => {
+    localStorage.setItem('riviera_voice_id', voiceId);
+  }, [voiceId]);
+
+  useEffect(() => {
+    localStorage.setItem('riviera_voice_rate', rate);
+  }, [rate]);
 
   const silenceTimerRef = React.useRef<NodeJS.Timeout | null>(null);
   const recognitionRef = React.useRef<any>(null);
@@ -96,6 +110,8 @@ const VoiceAssistantOverlay = ({ isOpen, onClose }: { isOpen: boolean; onClose: 
   const streamRef = React.useRef<MediaStream | null>(null);
   const animationFrameRef = React.useRef<number | null>(null);
   const currentAudioRef = React.useRef<HTMLAudioElement | null>(null);
+  // Ref to reliably read the latest final transcript inside recognition.onend
+  const finalTranscriptRef = React.useRef<string>('');
 
   useEffect(() => {
     if (isOpen) {
@@ -109,6 +125,8 @@ const VoiceAssistantOverlay = ({ isOpen, onClose }: { isOpen: boolean; onClose: 
   }, [isOpen]);
 
   const cleanup = () => {
+    // Stop browser TTS if greeting is still playing
+    if (window.speechSynthesis) window.speechSynthesis.cancel();
     if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
     if (recognitionRef.current) {
       recognitionRef.current.onend = null;
@@ -130,27 +148,38 @@ const VoiceAssistantOverlay = ({ isOpen, onClose }: { isOpen: boolean; onClose: 
 
   const playGreeting = async () => {
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/v1/voice/speak', {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token || "";
+      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+
+      const response = await fetch(`${API_URL}/voice/speak`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: "Hi! I am River, how can I help you?", voice_id: 'en-US-AriaNeural' })
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ text: "Hi! I am River. How can I help you?", voice_id: voiceId, rate: rate, sassy: isSassy })
       });
-      if (!response.ok) throw new Error("Failed to generate greeting");
+
+      if (!response.ok) throw new Error("Failed to fetch greeting audio");
       
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
+      setAudioUrl(url);
       
       const audio = new Audio(url);
       currentAudioRef.current = audio;
       audio.onended = () => {
         setStatus('idle');
+        setAudioUrl(null);
         startListening();
       };
       audio.play();
-    } catch (e) {
-      console.error("Greeting failed", e);
-      // Fallback: just start listening if greeting fails
-      startListening();
+
+    } catch (error) {
+      console.error("Greeting error:", error);
+      setStatus('idle');
+      startListening(); // Fallback to listening if greeting fails
     }
   };
 
@@ -194,6 +223,7 @@ const VoiceAssistantOverlay = ({ isOpen, onClose }: { isOpen: boolean; onClose: 
   const startListening = () => {
     setStatus('listening');
     setTranscript('');
+    finalTranscriptRef.current = ''; // Reset the ref
     
     // Start Audio Analysis for Pulsing
     startVolumeAnalysis();
@@ -212,38 +242,53 @@ const VoiceAssistantOverlay = ({ isOpen, onClose }: { isOpen: boolean; onClose: 
     recognition.continuous = true;
 
     recognition.onresult = (event: any) => {
-      let finalTranscript = '';
+      // Only accumulate *final* results to avoid interim gibberish
+      let newFinal = '';
       for (let i = event.resultIndex; i < event.results.length; ++i) {
-        finalTranscript += event.results[i][0].transcript;
+        if (event.results[i].isFinal) {
+          newFinal += event.results[i][0].transcript;
+        }
       }
-      setTranscript(finalTranscript);
 
-      // Reset 5-second silence timer
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-      silenceTimerRef.current = setTimeout(() => {
-        recognition.stop();
-      }, 5000);
+      if (newFinal) {
+        finalTranscriptRef.current += newFinal;
+        setTranscript(finalTranscriptRef.current);
+
+        // Reset 5-second silence timer each time we get final speech
+        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = setTimeout(() => {
+          recognition.stop();
+        }, 5000);
+      }
     };
 
-    // Initial 5-second timer in case they don't say anything
+    // Initial 10-second timer in case they don't say anything at all
     silenceTimerRef.current = setTimeout(() => {
         recognition.stop();
-    }, 5000);
+    }, 10000);
+
+    recognition.onerror = (event: any) => {
+      console.error('Speech recognition error:', event.error);
+      // On 'no-speech' or 'audio-capture', let onend handle cleanup
+      if (event.error === 'aborted') return;
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+    };
 
     recognition.onend = async () => {
       if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
       if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(t => t.stop());
+        streamRef.current = null;
+      }
       
-      // If we stopped because of silence and we have transcript, process it.
-      setTranscript(currentTranscript => {
-        if (currentTranscript.trim()) {
-           processVoiceCommand(currentTranscript);
-        } else {
-           setStatus('idle');
-        }
-        return currentTranscript;
-      });
+      // Read from ref — avoids stale React state closure bug
+      const captured = finalTranscriptRef.current.trim();
+      if (captured) {
+        processVoiceCommand(captured);
+      } else {
+        setStatus('idle');
+      }
     };
 
     recognition.start();
@@ -252,10 +297,18 @@ const VoiceAssistantOverlay = ({ isOpen, onClose }: { isOpen: boolean; onClose: 
   const processVoiceCommand = async (text: string) => {
     setStatus('processing');
     try {
-      const response = await fetch('http://127.0.0.1:8000/api/v1/voice/process', {
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token || "";
+
+      // Use the same VITE_API_URL pattern as api/chat.ts and api/documents.ts
+      const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+      const response = await fetch(`${API_URL}/voice/process`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, voice_id: 'en-US-AriaNeural' })
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ text, voice_id: voiceId, rate: rate, sassy: isSassy })
       });
 
       if (!response.ok) throw new Error("Failed to process speech");
@@ -293,6 +346,14 @@ const VoiceAssistantOverlay = ({ isOpen, onClose }: { isOpen: boolean; onClose: 
   const isActive = status !== 'idle';
   const scale = isActive ? 1 + Math.min(volume / 50, 0.4) : 0.9;
 
+  const statusLabel = {
+    greeting: 'GREETING...',
+    listening: 'LISTENING...',
+    processing: 'THINKING...',
+    speaking: 'SPEAKING...',
+    idle: 'TAP TO SPEAK',
+  }[status];
+
   return (
     <div className="fixed inset-0 z-[100] bg-[#05010A] flex flex-col items-center justify-center transition-all duration-500 animate-in fade-in zoom-in-95">
       {/* Background gradients */}
@@ -306,7 +367,23 @@ const VoiceAssistantOverlay = ({ isOpen, onClose }: { isOpen: boolean; onClose: 
         >
           <ArrowLeft size={20} />
         </button>
+
+        <button 
+          onClick={() => setIsSettingsOpen(true)}
+          className="w-12 h-12 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10 transition-all backdrop-blur-md"
+        >
+          <Settings size={20} />
+        </button>
       </div>
+
+      <VoiceSettings 
+        isOpen={isSettingsOpen} 
+        onClose={() => setIsSettingsOpen(false)} 
+        voiceId={voiceId} 
+        setVoiceId={setVoiceId} 
+        rate={rate} 
+        setRate={setRate} 
+      />
 
       {/* Main String Visualization */}
       <div 
@@ -384,10 +461,7 @@ const VoiceAssistantOverlay = ({ isOpen, onClose }: { isOpen: boolean; onClose: 
         {/* Status indicator */}
         <div className="absolute bottom-[-60px] flex flex-col items-center gap-2">
            <div className={`h-8 flex items-center justify-center font-mono text-sm tracking-widest uppercase transition-opacity duration-500 ${isActive ? 'opacity-100 text-[#EBAA62]' : 'opacity-50 text-muted-foreground'}`}>
-              {status === 'greeting' && 'GREETING...'}
-              {status === 'listening' && 'LISTENING...'}
-              {status === 'processing' && 'PROCESSING...'}
-              {status === 'speaking' && 'SPEAKING...'}
+              {statusLabel}
            </div>
            {transcript && status !== 'processing' && status !== 'speaking' && (
              <div className="text-white/80 text-sm max-w-xs text-center line-clamp-2 px-4 italic">"{transcript}"</div>
@@ -466,22 +540,7 @@ const LandingPage = () => {
               </div>
             </div>
 
-            <div className="relative z-10 grid grid-cols-2 gap-4">
-              <div className="p-5 rounded-2xl bg-background/60 border border-border/50 backdrop-blur-sm">
-                <p className="text-xs uppercase tracking-wider text-muted-foreground mb-3">Grounding Accuracy</p>
-                <div className="flex items-end gap-2">
-                  <span className="text-5xl font-mono font-bold text-white drop-shadow-[0_0_15px_rgba(255,255,255,0.3)]">99.4</span>
-                  <span className="text-primary mb-1.5 font-bold">%</span>
-                </div>
-              </div>
-              <div className="p-5 rounded-2xl bg-background/60 border border-border/50 backdrop-blur-sm">
-                <p className="text-xs uppercase tracking-wider text-muted-foreground mb-3">Indexed Material</p>
-                <div className="flex items-end gap-2">
-                  <span className="text-5xl font-mono font-bold text-white">12.4</span>
-                  <span className="text-muted-foreground mb-1.5">GB</span>
-                </div>
-              </div>
-            </div>
+
           </div>
 
           <div className="md:col-span-4 p-8 rounded-3xl bg-card/40 backdrop-blur-xl border border-border/60 shadow-2xl flex flex-col justify-between group relative overflow-hidden">
@@ -494,22 +553,7 @@ const LandingPage = () => {
               <p className="text-sm text-muted-foreground">Real-time conflict detection.</p>
             </div>
             
-            <div className="space-y-3 relative z-10">
-              <div className="flex items-center justify-between p-3.5 rounded-xl bg-background/60 border border-border/50 backdrop-blur-sm text-sm">
-                <div className="flex items-center gap-2.5">
-                  <CheckCircle2 size={18} className="text-primary drop-shadow-[0_0_8px_rgba(197,111,67,0.6)]" />
-                  <span className="text-white font-medium">Schedule Match</span>
-                </div>
-                <span className="font-mono text-xs text-muted-foreground">0ms</span>
-              </div>
-              <div className="flex items-center justify-between p-3.5 rounded-xl bg-background/60 border border-border/50 backdrop-blur-sm text-sm">
-                <div className="flex items-center gap-2.5">
-                  <Clock size={18} className="text-muted-foreground" />
-                  <span className="text-muted-foreground">Exam Conflicts</span>
-                </div>
-                <span className="font-mono text-xs text-primary font-medium">None</span>
-              </div>
-            </div>
+
           </div>
 
           <div className="md:col-span-12 p-10 rounded-3xl bg-gradient-to-br from-card/80 to-background/40 backdrop-blur-xl border border-border/60 shadow-2xl relative overflow-hidden">
@@ -664,6 +708,13 @@ const Chat = () => {
   const [messages, setMessages] = useState<{role: 'user' | 'bot', content: string, sources?: any[]}[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isSassy, setIsSassy] = useState(() => {
+    return localStorage.getItem('riviera_sassy_mode') === 'true';
+  });
+
+  useEffect(() => {
+    localStorage.setItem('riviera_sassy_mode', isSassy.toString());
+  }, [isSassy]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -716,7 +767,7 @@ const Chat = () => {
           }
           return newMessages;
         });
-      });
+      }, isSassy);
     } catch (error) {
       setMessages(prev => {
         const newMessages = [...prev];
@@ -731,7 +782,7 @@ const Chat = () => {
 
   return (
     <div className="flex flex-col items-center h-[calc(100vh-4rem)] relative w-full overflow-hidden px-4">
-      <VoiceAssistantOverlay isOpen={isVoiceMode} onClose={() => setIsVoiceMode(false)} />
+      <VoiceAssistantOverlay isOpen={isVoiceMode} onClose={() => setIsVoiceMode(false)} isSassy={isSassy} />
 
       {/* Realistic 3D Black Hole Background */}
       <RealisticBlackHole />
