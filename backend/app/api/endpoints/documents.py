@@ -16,7 +16,7 @@ async def upload_document(
         content = await file.read()
         text_content = content.decode('utf-8')
         
-        # Simple chunking by paragraph for the hackathon
+        # Simple paragraph-based chunking strategy
         paragraphs = [p.strip() for p in text_content.split('\n\n') if p.strip()]
         
         docs = []

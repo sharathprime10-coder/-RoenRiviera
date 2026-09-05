@@ -325,5 +325,5 @@ User sends message
 
 ## 📄 License
 
-MIT — Built for the RoenRiviera Hackathon 2026.
+MIT — RoenRiviera Campus Friend AI © 2026.
 

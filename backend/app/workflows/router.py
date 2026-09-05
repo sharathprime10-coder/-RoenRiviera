@@ -69,7 +69,7 @@ async def route_workflow_stream(request: ChatRequest) -> AsyncGenerator[str, Non
 async def route_workflow(request: ChatRequest) -> ChatResponse:
     # Generate a conversation ID if not provided
     conv_id = request.conversation_id or str(uuid.uuid4())
-    user_id = "user_123" # Mocked user ID for hackathon
+    user_id = "user_123" # TODO: extract real user_id from JWT payload
     
     # Save user message
     save_message(user_id, conv_id, "user", request.message)
@@ -94,7 +94,7 @@ async def route_workflow(request: ChatRequest) -> ChatResponse:
     elif workflow == "campus_faq":
         response = await execute_campus_faq(request, conv_id)
     elif workflow == "timetable":
-        # Hardcoding a dummy user_id for the hackathon version
+        # TODO: extract real user_id from JWT payload
         response = await check_timetable_conflict(request.message, "user_123", conv_id)
     elif workflow == "chitchat" or workflow == "simple_chat":
         response = await execute_simple_chat(request, conv_id)

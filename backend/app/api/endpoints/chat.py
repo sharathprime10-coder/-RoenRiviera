@@ -46,6 +46,6 @@ async def chat_stream_endpoint(
 
 @router.get("/history/{conversation_id}")
 async def get_chat_history(conversation_id: str, current_user: dict = Depends(verify_token)):
-    user_id = "user_123" # Mocked for hackathon
+    user_id = "user_123" # TODO: extract real user_id from JWT payload
     messages = get_recent_messages(user_id, conversation_id, limit=50)
     return {"messages": messages}
