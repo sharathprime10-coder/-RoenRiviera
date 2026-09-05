@@ -19,6 +19,84 @@ Riviera follows a modern decoupled architecture:
 *   **Database & Authentication**: Managed by Supabase (PostgreSQL), ensuring secure user sessions and reliable data persistence.
 *   **Voice Engine**: Integrates `edge-tts` for dynamic, localized voice synthesis.
 
+```mermaid
+graph TD
+    %% Aesthetic styling
+    classDef frontend fill:#1E293B,stroke:#38BDF8,stroke-width:2px,color:#F8FAFC,rx:10,ry:10
+    classDef gateway fill:#1E293B,stroke:#A78BFA,stroke-width:2px,color:#F8FAFC,rx:10,ry:10
+    classDef security fill:#1E293B,stroke:#F43F5E,stroke-width:2px,color:#F8FAFC,rx:10,ry:10
+    classDef llm fill:#1E293B,stroke:#34D399,stroke-width:2px,color:#F8FAFC,rx:10,ry:10
+    classDef db fill:#1E293B,stroke:#FBBF24,stroke-width:2px,color:#F8FAFC,rx:10,ry:10
+    classDef memory fill:#1E293B,stroke:#F472B6,stroke-width:2px,color:#F8FAFC,rx:10,ry:10
+    classDef auth fill:#1E293B,stroke:#FB923C,stroke-width:2px,color:#F8FAFC,rx:10,ry:10
+    classDef voice fill:#1E293B,stroke:#60A5FA,stroke-width:2px,color:#F8FAFC,rx:10,ry:10
+
+    User([👤 User / React UI]):::frontend
+    
+    subgraph Core System [FastAPI Backend]
+        Auth[🛡️ JWT Verification]:::security
+        Guards[🚧 Input Guardrails]:::security
+        RateLimit[⏱️ Rate Limiter]:::security
+        Router{⚙️ Workflow Router}:::gateway
+        Stream[🌊 Streaming SSE Response]:::gateway
+        VoiceAPI[🎙️ Voice Synthesizer]:::voice
+    end
+
+    subgraph LangGraph Orchestration [Intelligent Agents]
+        RAG[📚 Syllabus RAG Agent]:::gateway
+        Timetable[📅 Schedule Analyzer]:::gateway
+        FAQ[❓ Campus FAQ Engine]:::gateway
+    end
+
+    subgraph External LLM Providers
+        OpenRouter[🧠 OpenRouter / Gemini]:::llm
+        Groq[⚡ Groq / Qwen]:::llm
+    end
+
+    subgraph Data Layer [Supabase]
+        VectorDB[(📂 pgvector Documents)]:::db
+        ChatMem[(💬 Short-term Chat)]:::memory
+        UserMem[(🧩 Long-term Memory)]:::memory
+        AuthDB[(🔑 Auth / Users)]:::auth
+    end
+
+    MemExtract[🔍 Memory Extractor Task]:::memory
+    Grounding[✅ Evidence Grounding]:::security
+
+    %% Data Flow
+    User -->|HTTP Requests| Auth
+    Auth --> Guards
+    Guards --> RateLimit
+    RateLimit --> Router
+    RateLimit --> Stream
+    RateLimit --> VoiceAPI
+
+    Router -->|Chitchat| OpenRouter
+    Router -->|RAG Query| RAG
+    Router -->|Timetable Query| Timetable
+    Router -->|General FAQ| FAQ
+    
+    Stream -.->|Asynchronous Events| RAG
+
+    RAG <-->|Similarity Search| VectorDB
+    RAG --> Groq
+    Timetable --> Groq
+    FAQ --> OpenRouter
+
+    Groq --> Grounding
+    Grounding -->|Validated Answer| Router
+
+    Router -->|Save History| ChatMem
+    Router -->|Fetch Context| UserMem
+    Router -.->|Every 5 messages| MemExtract
+    MemExtract -->|Upsert Facts| UserMem
+
+    VoiceAPI -->|edge-tts TTS| User
+    OpenRouter -->|Fast Text| User
+    Router -->|JSON Data| User
+    Stream -->|SSE Chunks| User
+```
+
 ## Quick Start
 
 ### Prerequisites
