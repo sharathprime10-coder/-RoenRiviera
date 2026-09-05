@@ -663,7 +663,26 @@ const Chat = () => {
   const [inputValue, setInputValue] = useState('');
   const [messages, setMessages] = useState<{role: 'user' | 'bot', content: string, sources?: any[]}[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    setMessages(prev => [...prev, { role: 'user', content: `[Uploading document: ${file.name}...]` }]);
+    try {
+      await uploadDocument(file);
+      setMessages(prev => [...prev, { role: 'bot', content: `Successfully indexed ${file.name}. It is now in my knowledge base!` }]);
+    } catch (error) {
+      setMessages(prev => [...prev, { role: 'bot', content: `Failed to upload ${file.name}.` }]);
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -717,13 +736,12 @@ const Chat = () => {
       {/* Realistic 3D Black Hole Background */}
       <RealisticBlackHole />
 
-      <div className="flex-1 w-full max-w-4xl mx-auto flex flex-col relative z-10 overflow-hidden mb-6 mt-6 bg-[#1A1512]/60 backdrop-blur-xl border border-border/50 rounded-3xl p-6 shadow-2xl">
+      <div className="flex-1 w-full max-w-4xl mx-auto flex flex-col relative z-10 overflow-hidden mb-6 mt-6 p-6">
         {messages.length === 0 ? (
           <div className="flex-1 flex flex-col items-center justify-center text-center">
-            <h2 className="text-4xl font-display font-bold text-white mb-4 tracking-tight drop-shadow-lg">
-              How can River help you today?
+            <h2 className="text-xl font-display font-medium text-white/80 mb-2 tracking-tight">
+              Hi I am River, what can I do for u
             </h2>
-            <p className="text-muted-foreground">Access your campus intelligence and timetable instantly.</p>
             
             <div className="flex flex-wrap justify-center gap-3 mt-8 relative z-10">
               {["Check my timetable conflicts", "Summarize OS Unit 3", "When is the exam deadline?"].map((prompt, i) => (
@@ -795,8 +813,20 @@ const Chat = () => {
           
           <div className="flex items-center justify-between px-2 pb-2 pt-2 border-t border-border/30">
             <div className="flex items-center gap-2">
-              <button className="w-8 h-8 rounded-full bg-background/50 hover:bg-background border border-border flex items-center justify-center text-muted-foreground transition-colors">
-                <span className="text-lg leading-none">+</span>
+              <input
+                type="file"
+                ref={fileInputRef}
+                className="hidden"
+                accept="image/*,.pdf,.pptx,.txt,.md,.docx,.csv"
+                onChange={handleFileUpload}
+              />
+              <button 
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+                title="Upload document to Knowledge Base"
+                className={`w-8 h-8 rounded-full bg-background/50 border border-border flex items-center justify-center transition-colors ${isUploading ? 'text-primary animate-pulse' : 'hover:bg-background text-muted-foreground'}`}
+              >
+                <span className="text-lg leading-none">{isUploading ? '...' : '+'}</span>
               </button>
               
               <button className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-background/50 hover:bg-background border border-border text-sm text-muted-foreground transition-colors">
@@ -872,6 +902,7 @@ const KnowledgeBase = () => {
           type="file" 
           ref={fileInputRef} 
           style={{ display: 'none' }} 
+          accept="image/*,.pdf,.pptx,.txt,.md,.docx,.csv"
           onChange={handleUpload}
         />
         <button 

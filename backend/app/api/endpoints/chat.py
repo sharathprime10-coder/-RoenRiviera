@@ -39,7 +39,8 @@ async def chat_stream_endpoint(
     is_safe, reason = check_input_safety(request.message)
     if not is_safe:
         async def mock_stream():
-            yield f"data: {json.dumps({'content': 'I can\\'t process that request.'})}\n\n"
+            msg = json.dumps({'content': 'I cannot process that request.'})
+            yield f"data: {msg}\n\n"
         return StreamingResponse(mock_stream(), media_type="text/event-stream")
 
     return StreamingResponse(route_workflow_stream(request), media_type="text/event-stream")

@@ -17,3 +17,9 @@ openai
 langchain-google-genai
 langchain-community
 fastembed
+pypdf
+python-pptx
+python-docx
+pytesseract
+Pillow
+python-multipart
