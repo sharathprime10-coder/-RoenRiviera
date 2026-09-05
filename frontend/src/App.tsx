@@ -1,6 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
-import { Bot, Library, Calendar, ArrowRight, ArrowLeft, Clock, CheckCircle2, Mic, X, Search, FileText, Upload, Settings, MessageSquare, MessageCircle } from 'lucide-react';
+import { Bot, Library, Calendar, ArrowRight, ArrowLeft, Clock, CheckCircle2, Mic, X, Search, FileText, Upload, Settings, MessageSquare, MessageCircle, User } from 'lucide-react';
+import { sendMessage, streamMessage } from './api/chat';
+import { uploadDocument } from './api/documents';
 
 const RoenLogo = ({ className = "h-8 w-auto" }: { className?: string }) => (
   <svg viewBox="0 0 160 100" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -658,30 +660,136 @@ const RealisticBlackHole = () => (
 
 const Chat = () => {
   const [isVoiceMode, setIsVoiceMode] = useState(false);
+  const [inputValue, setInputValue] = useState('');
+  const [messages, setMessages] = useState<{role: 'user' | 'bot', content: string, sources?: any[]}[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
+
+  const handleSend = async (text: string = inputValue) => {
+    if (!text.trim()) return;
+    
+    setMessages(prev => [...prev, { role: 'user', content: text }]);
+    setInputValue('');
+    setIsLoading(true);
+
+    try {
+      // Add an initial empty bot message to stream into
+      setMessages(prev => [...prev, { role: 'bot', content: '' }]);
+      
+      await streamMessage(text, 'auto', (chunk) => {
+        setIsLoading(false); // turn off loading spinner as soon as first chunk arrives
+        setMessages(prev => {
+          const newMessages = [...prev];
+          const lastIndex = newMessages.length - 1;
+          if (newMessages[lastIndex].role === 'bot') {
+            newMessages[lastIndex] = {
+              ...newMessages[lastIndex],
+              content: newMessages[lastIndex].content + chunk
+            };
+          }
+          return newMessages;
+        });
+      });
+    } catch (error) {
+      setMessages(prev => {
+        const newMessages = [...prev];
+        const lastIndex = newMessages.length - 1;
+        newMessages[lastIndex] = { role: 'bot', content: 'Failed to connect to backend.' };
+        return newMessages;
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   return (
-    <div className="flex flex-col items-center justify-center h-[calc(100vh-4rem)] relative w-full overflow-hidden px-4">
+    <div className="flex flex-col items-center h-[calc(100vh-4rem)] relative w-full overflow-hidden px-4">
       <VoiceAssistantOverlay isOpen={isVoiceMode} onClose={() => setIsVoiceMode(false)} />
 
       {/* Realistic 3D Black Hole Background */}
       <RealisticBlackHole />
 
-      <div className="text-center mb-12 relative z-10 max-w-4xl mx-auto w-full">
-        <h2 className="text-4xl font-display font-bold text-white mb-4 tracking-tight drop-shadow-lg">
-          How can River help you today?
-        </h2>
-        <p className="text-muted-foreground">Access your campus intelligence and timetable instantly.</p>
+      <div className="flex-1 w-full max-w-4xl mx-auto flex flex-col relative z-10 overflow-hidden mb-6 mt-6 bg-[#1A1512]/60 backdrop-blur-xl border border-border/50 rounded-3xl p-6 shadow-2xl">
+        {messages.length === 0 ? (
+          <div className="flex-1 flex flex-col items-center justify-center text-center">
+            <h2 className="text-4xl font-display font-bold text-white mb-4 tracking-tight drop-shadow-lg">
+              How can River help you today?
+            </h2>
+            <p className="text-muted-foreground">Access your campus intelligence and timetable instantly.</p>
+            
+            <div className="flex flex-wrap justify-center gap-3 mt-8 relative z-10">
+              {["Check my timetable conflicts", "Summarize OS Unit 3", "When is the exam deadline?"].map((prompt, i) => (
+                <button 
+                  key={i} 
+                  onClick={() => handleSend(prompt)}
+                  className="px-4 py-2 rounded-full bg-card/40 border border-border/50 text-sm text-muted-foreground hover:text-white hover:border-primary/40 transition-colors backdrop-blur-md"
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="flex-1 overflow-y-auto space-y-6 pb-4 pr-2 custom-scrollbar">
+            {messages.map((msg, i) => (
+              <div key={i} className={`flex gap-4 ${msg.role === 'user' ? 'flex-row-reverse' : ''}`}>
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${msg.role === 'user' ? 'bg-primary/20 text-primary' : 'bg-card border border-border text-white'}`}>
+                  {msg.role === 'user' ? <User size={18} /> : <Bot size={18} />}
+                </div>
+                <div className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'} max-w-[80%]`}>
+                  <div className={`px-5 py-3 rounded-2xl text-[15px] leading-relaxed ${msg.role === 'user' ? 'bg-primary text-white rounded-tr-sm' : 'bg-background/80 border border-border/50 text-white/90 rounded-tl-sm'}`}>
+                    {msg.content}
+                  </div>
+                  {msg.sources && msg.sources.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      {msg.sources.map((src, idx) => (
+                        <div key={idx} className="flex items-center gap-1.5 px-3 py-1.5 bg-background/50 border border-border/30 rounded-lg text-xs text-muted-foreground">
+                          <FileText size={12} className="text-primary" /> {src.document_name}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+            {isLoading && (
+              <div className="flex gap-4">
+                <div className="w-10 h-10 rounded-full bg-card border border-border text-white flex items-center justify-center">
+                  <Bot size={18} className="animate-pulse text-primary" />
+                </div>
+                <div className="px-5 py-4 rounded-2xl bg-background/80 border border-border/50 flex items-center gap-2 rounded-tl-sm">
+                  <div className="w-2 h-2 rounded-full bg-primary/50 animate-bounce"></div>
+                  <div className="w-2 h-2 rounded-full bg-primary/50 animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                  <div className="w-2 h-2 rounded-full bg-primary/50 animate-bounce" style={{ animationDelay: '0.4s' }}></div>
+                </div>
+              </div>
+            )}
+            <div ref={messagesEndRef} />
+          </div>
+        )}
       </div>
 
-      {/* Central Input Bar matching the reference */}
-      <div className="w-full max-w-3xl relative z-10">
-        {/* Glow behind the input bar */}
+      {/* Central Input Bar */}
+      <div className="w-full max-w-3xl relative z-10 mb-8">
         <div className="absolute -inset-1 bg-gradient-to-r from-primary/30 via-[#EBAA62]/20 to-primary/30 rounded-3xl blur-xl opacity-70"></div>
         
         <div className="relative bg-[#1A1512]/90 backdrop-blur-2xl border border-border/80 rounded-2xl p-2 shadow-2xl flex flex-col transition-all duration-300">
           <input 
             type="text" 
             placeholder="Ask anything..."
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleSend();
+            }}
             className="w-full bg-transparent px-4 py-5 text-lg text-white placeholder:text-muted-foreground focus:outline-none"
           />
           
@@ -708,21 +816,16 @@ const Chat = () => {
                 <Mic size={16} />
               </button>
               
-              <button className="w-8 h-8 rounded-full bg-primary hover:bg-[#A85B33] flex items-center justify-center text-white transition-all shadow-[0_0_15px_rgba(197,111,67,0.4)]">
+              <button 
+                onClick={() => handleSend()}
+                disabled={isLoading}
+                className="w-8 h-8 rounded-full bg-primary hover:bg-[#A85B33] flex items-center justify-center text-white transition-all shadow-[0_0_15px_rgba(197,111,67,0.4)] disabled:opacity-50"
+              >
                 <ArrowRight size={16} />
               </button>
             </div>
           </div>
         </div>
-      </div>
-
-      {/* Suggested prompts */}
-      <div className="flex flex-wrap justify-center gap-3 mt-8 relative z-10">
-        {["Check my timetable conflicts", "Summarize OS Unit 3", "When is the exam deadline?"].map((prompt, i) => (
-          <button key={i} className="px-4 py-2 rounded-full bg-card/40 border border-border/50 text-sm text-muted-foreground hover:text-white hover:border-primary/40 transition-colors backdrop-blur-md">
-            {prompt}
-          </button>
-        ))}
       </div>
     </div>
   );
@@ -732,14 +835,26 @@ const KnowledgeBase = () => {
   const [documents, setDocuments] = useState<{name: string; type: string; date: string}[]>([]);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
 
-  const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const [isUploading, setIsUploading] = useState(false);
+
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const file = e.target.files[0];
-      setDocuments(prev => [{
-        name: file.name,
-        type: 'Uploaded Document',
-        date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-      }, ...prev]);
+      setIsUploading(true);
+      try {
+        await uploadDocument(file);
+        setDocuments(prev => [{
+          name: file.name,
+          type: 'Uploaded Document',
+          date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+        }, ...prev]);
+        alert("Upload successful! Document is now available for chat.");
+      } catch (err) {
+        alert("Failed to upload document.");
+        console.error(err);
+      } finally {
+        setIsUploading(false);
+      }
     }
   };
 
@@ -761,9 +876,10 @@ const KnowledgeBase = () => {
         />
         <button 
           onClick={() => fileInputRef.current?.click()}
-          className="flex items-center gap-2 bg-white text-[#15110E] px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-200 transition-colors"
+          disabled={isUploading}
+          className="flex items-center gap-2 bg-white text-[#15110E] px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-200 transition-colors disabled:opacity-50"
         >
-          <Upload size={16} /> Upload Data
+          <Upload size={16} /> {isUploading ? 'Uploading...' : 'Upload Document'}
         </button>
       </div>
       
