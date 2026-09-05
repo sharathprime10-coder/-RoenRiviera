@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
-import { Bot, Library, Calendar, ArrowRight, Clock, CheckCircle2, Mic, X, Search, FileText, Upload, Settings } from 'lucide-react';
+import { Bot, Library, Calendar, ArrowRight, ArrowLeft, Clock, CheckCircle2, Mic, X, Search, FileText, Upload, Settings, MessageSquare, MessageCircle } from 'lucide-react';
 
 const RoenLogo = ({ className = "h-8 w-auto" }: { className?: string }) => (
   <svg viewBox="0 0 160 100" className={className} fill="none" xmlns="http://www.w3.org/2000/svg">
@@ -81,72 +81,316 @@ const DesertGalaxy = () => {
 };
 
 const VoiceAssistantOverlay = ({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) => {
+  const [status, setStatus] = useState<'idle' | 'greeting' | 'listening' | 'processing' | 'speaking'>('idle');
+  const [transcript, setTranscript] = useState('');
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [volume, setVolume] = useState(0);
+
+  const silenceTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+  const recognitionRef = React.useRef<any>(null);
+  const audioContextRef = React.useRef<AudioContext | null>(null);
+  const analyserRef = React.useRef<AnalyserNode | null>(null);
+  const microphoneRef = React.useRef<MediaStreamAudioSourceNode | null>(null);
+  const streamRef = React.useRef<MediaStream | null>(null);
+  const animationFrameRef = React.useRef<number | null>(null);
+  const currentAudioRef = React.useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    if (isOpen) {
+      // Step 1: Auto Greeting
+      setStatus('greeting');
+      playGreeting();
+    } else {
+      cleanup();
+    }
+    return cleanup;
+  }, [isOpen]);
+
+  const cleanup = () => {
+    if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+    if (recognitionRef.current) {
+      recognitionRef.current.onend = null;
+      recognitionRef.current.stop();
+    }
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause();
+      currentAudioRef.current = null;
+    }
+    if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+    if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+    if (audioContextRef.current) audioContextRef.current.close();
+    
+    setStatus('idle');
+    setTranscript('');
+    setAudioUrl(null);
+    setVolume(0);
+  };
+
+  const playGreeting = async () => {
+    try {
+      const response = await fetch('http://127.0.0.1:8000/api/v1/voice/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: "Hi! I am River, how can I help you?", voice_id: 'en-US-AriaNeural' })
+      });
+      if (!response.ok) throw new Error("Failed to generate greeting");
+      
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      
+      const audio = new Audio(url);
+      currentAudioRef.current = audio;
+      audio.onended = () => {
+        setStatus('idle');
+        startListening();
+      };
+      audio.play();
+    } catch (e) {
+      console.error("Greeting failed", e);
+      // Fallback: just start listening if greeting fails
+      startListening();
+    }
+  };
+
+  const startVolumeAnalysis = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+      streamRef.current = stream;
+      
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      audioContextRef.current = audioContext;
+      
+      const analyser = audioContext.createAnalyser();
+      analyser.fftSize = 256;
+      analyserRef.current = analyser;
+      
+      const microphone = audioContext.createMediaStreamSource(stream);
+      microphoneRef.current = microphone;
+      microphone.connect(analyser);
+      
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      
+      const updateVolume = () => {
+        if (!analyserRef.current) return;
+        analyserRef.current.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          sum += dataArray[i];
+        }
+        const average = sum / dataArray.length;
+        setVolume(average); // 0 to 255
+        
+        animationFrameRef.current = requestAnimationFrame(updateVolume);
+      };
+      
+      updateVolume();
+    } catch (e) {
+      console.error("Microphone access denied or error", e);
+    }
+  };
+
+  const startListening = () => {
+    setStatus('listening');
+    setTranscript('');
+    
+    // Start Audio Analysis for Pulsing
+    startVolumeAnalysis();
+
+    // @ts-ignore
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert("Your browser does not support Speech Recognition.");
+      return;
+    }
+
+    const recognition = new SpeechRecognition();
+    recognitionRef.current = recognition;
+    recognition.lang = 'en-US';
+    recognition.interimResults = true;
+    recognition.continuous = true;
+
+    recognition.onresult = (event: any) => {
+      let finalTranscript = '';
+      for (let i = event.resultIndex; i < event.results.length; ++i) {
+        finalTranscript += event.results[i][0].transcript;
+      }
+      setTranscript(finalTranscript);
+
+      // Reset 5-second silence timer
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = setTimeout(() => {
+        recognition.stop();
+      }, 5000);
+    };
+
+    // Initial 5-second timer in case they don't say anything
+    silenceTimerRef.current = setTimeout(() => {
+        recognition.stop();
+    }, 5000);
+
+    recognition.onend = async () => {
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+      if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
+      
+      // If we stopped because of silence and we have transcript, process it.
+      setTranscript(currentTranscript => {
+        if (currentTranscript.trim()) {
+           processVoiceCommand(currentTranscript);
+        } else {
+           setStatus('idle');
+        }
+        return currentTranscript;
+      });
+    };
+
+    recognition.start();
+  };
+
+  const processVoiceCommand = async (text: string) => {
+    setStatus('processing');
+    try {
+      const response = await fetch('http://127.0.0.1:8000/api/v1/voice/process', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, voice_id: 'en-US-AriaNeural' })
+      });
+
+      if (!response.ok) throw new Error("Failed to process speech");
+      
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      setAudioUrl(url);
+      setStatus('speaking');
+      
+      const audio = new Audio(url);
+      currentAudioRef.current = audio;
+      audio.onended = () => {
+        setStatus('idle');
+        setAudioUrl(null);
+        startListening(); // Auto loop back to listening
+      };
+      audio.play();
+
+    } catch (error) {
+      console.error(error);
+      setStatus('idle');
+    }
+  };
+
+  const toggleListening = () => {
+    if (status === 'listening') {
+      if (recognitionRef.current) recognitionRef.current.stop();
+    } else if (status === 'idle') {
+      startListening();
+    }
+  };
+
   if (!isOpen) return null;
 
+  const isActive = status !== 'idle';
+  const scale = isActive ? 1 + Math.min(volume / 50, 0.4) : 0.9;
+
   return (
-    <div className="fixed inset-0 z-[100] bg-[#15110E]/95 backdrop-blur-2xl flex flex-col items-center justify-center transition-all duration-500 animate-in fade-in zoom-in-95">
-      <button 
-        onClick={onClose}
-        className="absolute top-8 right-8 p-3 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-muted-foreground hover:text-white transition-all"
+    <div className="fixed inset-0 z-[100] bg-[#05010A] flex flex-col items-center justify-center transition-all duration-500 animate-in fade-in zoom-in-95">
+      {/* Background gradients */}
+      <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-[#C56F43]/10 via-[#05010A] to-[#05010A] pointer-events-none"></div>
+
+      {/* Top Bar */}
+      <div className="absolute top-0 left-0 w-full p-6 flex items-center justify-between z-50">
+        <button 
+          onClick={onClose}
+          className="w-12 h-12 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-white/70 hover:text-white hover:bg-white/10 transition-all backdrop-blur-md"
+        >
+          <ArrowLeft size={20} />
+        </button>
+      </div>
+
+      {/* Main String Visualization */}
+      <div 
+        className="relative w-full max-w-lg aspect-square flex items-center justify-center flex-col gap-12 mt-8 z-10" 
+        onClick={toggleListening}
       >
-        <X size={24} />
-      </button>
+        <div className="relative w-[320px] h-[320px] sm:w-[400px] sm:h-[400px] flex items-center justify-center cursor-pointer group">
+          {/* Deep desert background glow */}
+          <div className={`absolute inset-0 rounded-full bg-[#A85B33]/20 blur-[80px] transition-all duration-100 pointer-events-none ${isActive ? 'opacity-100' : 'opacity-40'}`} style={{ transform: `scale(${scale})` }}></div>
+          
+          {/* Core intense glow */}
+          <div className={`absolute inset-1/4 rounded-full bg-[#EBAA62]/20 blur-[50px] transition-all duration-100 pointer-events-none ${isActive ? 'opacity-100' : 'opacity-0'}`} style={{ transform: `scale(${scale * 1.15})` }}></div>
 
-      <div className="relative w-80 h-80 flex items-center justify-center">
-        {/* Core glow */}
-        <div className="absolute inset-0 rounded-full bg-primary/20 blur-[60px] animate-pulse"></div>
-        
-        {/* Outer rotating ring */}
-        <div 
-          className="absolute inset-4 rounded-full border-[3px] border-primary/80 shadow-[0_0_40px_#C56F43,inset_0_0_30px_#C56F43] animate-[orbital-spin_4s_linear_infinite]"
-          style={{ borderTopColor: 'transparent', borderBottomColor: 'transparent' }}
-        ></div>
-        
-        {/* Inner rotating ring */}
-        <div 
-          className="absolute inset-8 rounded-full border-[2px] border-[#EBAA62]/60 shadow-[0_0_20px_#EBAA62] animate-[orbital-spin-reverse_3s_linear_infinite]"
-          style={{ borderLeftColor: 'transparent', borderRightColor: 'transparent' }}
-        ></div>
+          <svg viewBox="0 0 200 200" className="w-full h-full absolute inset-0 z-10 overflow-visible pointer-events-none">
+            <defs>
+              <filter id="desert-glow" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur in="SourceGraphic" stdDeviation="1.5" result="blur1" />
+                <feGaussianBlur in="SourceGraphic" stdDeviation="3" result="blur2" />
+                <feMerge>
+                  <feMergeNode in="blur2" />
+                  <feMergeNode in="blur1" />
+                  <feMergeNode in="SourceGraphic" />
+                </feMerge>
+              </filter>
+            </defs>
 
-        {/* Center dense core */}
-        <div className="absolute w-24 h-24 rounded-full bg-gradient-to-br from-primary via-[#EBAA62] to-primary/50 shadow-[0_0_80px_#C56F43] flex items-center justify-center opacity-90 animate-pulse">
-          <Mic size={32} className="text-[#15110E]" />
+            <g filter="url(#desert-glow)">
+              {[...Array(12)].map((_, i) => (
+                <g key={i} style={{ transformOrigin: '100px 100px', transform: `rotate(${i * 15}deg)` }}>
+                  <ellipse
+                    cx="100"
+                    cy="100"
+                    rx={88 + Math.sin(i) * 6}
+                    ry={78 - Math.cos(i) * 6}
+                    fill="none"
+                    stroke={i % 2 === 0 ? "#C56F43" : "#EBAA62"}
+                    strokeWidth={0.5 + (i % 3) * 0.25}
+                    className="mix-blend-screen"
+                    style={{
+                      transformOrigin: '100px 100px',
+                      opacity: 0.6 + (i * 0.03),
+                      animation: isActive 
+                        ? `orbital-spin ${3 + i * 0.5}s linear infinite ${i % 2 === 0 ? 'reverse' : 'normal'}` 
+                        : `orbital-spin ${25 + i}s linear infinite ${i % 2 === 0 ? 'reverse' : 'normal'}`
+                    }}
+                  />
+                </g>
+              ))}
+            </g>
+            
+            {/* Additional active state strings */}
+            <g filter="url(#desert-glow)" className={`transition-opacity duration-1000 ${isActive ? 'opacity-100' : 'opacity-0'}`}>
+              {[...Array(4)].map((_, i) => (
+                <g key={`active-${i}`} style={{ transformOrigin: '100px 100px', transform: `rotate(${i * 45 + 15}deg)` }}>
+                  <ellipse
+                    cx="100"
+                    cy="100"
+                    rx={92 + i * 2}
+                    ry={82 - i * 2}
+                    fill="none"
+                    stroke="#FAD28B"
+                    strokeWidth="0.5"
+                    className="mix-blend-screen"
+                    style={{
+                      transformOrigin: '100px 100px',
+                      animation: `orbital-spin-reverse ${1.5 + i * 0.5}s linear infinite`
+                    }}
+                  />
+                </g>
+              ))}
+            </g>
+          </svg>
         </div>
 
-        {/* Particle effects (simulated) */}
-        <div className="absolute inset-0 overflow-hidden rounded-full pointer-events-none">
-          {[...Array(12)].map((_, i) => (
-            <div 
-              key={i}
-              className="absolute w-1 h-1 bg-white rounded-full shadow-[0_0_10px_#FFF]"
-              style={{
-                top: '50%',
-                left: '50%',
-                transform: `rotate(${i * 30}deg) translateY(-80px)`,
-                animation: `particle-float ${2 + Math.random() * 2}s infinite ${Math.random() * 2}s`
-              }}
-            ></div>
-          ))}
+        {/* Status indicator */}
+        <div className="absolute bottom-[-60px] flex flex-col items-center gap-2">
+           <div className={`h-8 flex items-center justify-center font-mono text-sm tracking-widest uppercase transition-opacity duration-500 ${isActive ? 'opacity-100 text-[#EBAA62]' : 'opacity-50 text-muted-foreground'}`}>
+              {status === 'greeting' && 'GREETING...'}
+              {status === 'listening' && 'LISTENING...'}
+              {status === 'processing' && 'PROCESSING...'}
+              {status === 'speaking' && 'SPEAKING...'}
+           </div>
+           {transcript && status !== 'processing' && status !== 'speaking' && (
+             <div className="text-white/80 text-sm max-w-xs text-center line-clamp-2 px-4 italic">"{transcript}"</div>
+           )}
         </div>
-      </div>
-
-      <div className="mt-16 flex flex-col items-center">
-        <h2 className="text-3xl font-display font-bold text-white mb-3">Hi, I'm River</h2>
-        <p className="text-xl text-muted-foreground font-light tracking-wide animate-pulse">Listening to your request...</p>
-      </div>
-
-      <div className="absolute bottom-12 flex gap-2">
-        {[1, 2, 3, 4, 5].map((i) => (
-          <div 
-            key={i}
-            className="w-1.5 bg-primary/80 rounded-full animate-pulse"
-            style={{ 
-              height: `${12 + Math.random() * 24}px`,
-              animationDuration: `${0.4 + Math.random() * 0.4}s`,
-              animationDelay: `${Math.random() * 0.2}s`
-            }}
-          ></div>
-        ))}
       </div>
     </div>
   );
@@ -160,7 +404,7 @@ const LandingPage = () => {
       <nav className="fixed top-0 left-0 right-0 z-40 px-6 py-4 flex items-center justify-between backdrop-blur-xl bg-background/50 border-b border-border/50">
         <div className="flex items-center gap-2">
           <RoenLogo className="h-10 w-14" />
-          <span className="font-display font-bold text-xl tracking-tight text-white hidden md:block">RoenRiviera</span>
+          <span className="font-display font-bold text-xl tracking-tight text-white hidden md:block">Riviera</span>
         </div>
 
         <div className="hidden md:flex items-center gap-1 bg-card/60 backdrop-blur-md border border-border/60 rounded-full px-2 py-1.5 shadow-lg">
@@ -168,6 +412,7 @@ const LandingPage = () => {
           <Link to="/chat" className="px-4 py-1.5 rounded-full text-sm font-medium text-muted-foreground hover:bg-white/5 hover:text-white transition-colors">Chat</Link>
           <Link to="/knowledge" className="px-4 py-1.5 rounded-full text-sm font-medium text-muted-foreground hover:bg-white/5 hover:text-white transition-colors">Knowledge Base</Link>
           <Link to="/timetable" className="px-4 py-1.5 rounded-full text-sm font-medium text-muted-foreground hover:bg-white/5 hover:text-white transition-colors">Timetable</Link>
+          <Link to="/forum" className="px-4 py-1.5 rounded-full text-sm font-medium text-muted-foreground hover:bg-white/5 hover:text-white transition-colors">Forum</Link>
         </div>
 
         <div className="flex items-center gap-4">
@@ -305,7 +550,7 @@ const LandingPage = () => {
       <footer className="border-t border-border/50 bg-background/80 backdrop-blur-xl py-8 px-6 relative z-10">
         <div className="max-w-7xl mx-auto flex items-center justify-center">
           <div className="text-xs text-muted-foreground">
-            © 2026 RoenRiviera. All rights reserved.
+            © 2026 Riviera. All rights reserved.
           </div>
         </div>
       </footer>
@@ -352,29 +597,26 @@ const Dashboard = () => (
             </div>
           </div>
           <div className="bg-card/50 rounded-xl p-4 border border-border/40 text-sm text-muted-foreground">
-            Good evening. I've synced 4 new documents from your Data Structures course and checked your timetable. You have a mid-term schedule conflict detected for next Thursday.
+            Hello! Upload some study materials in the Knowledge Base, and I will index them to help you answer questions and organize your schedule.
           </div>
         </div>
         
         <div className="grid grid-cols-2 gap-4">
           <div className="p-5 rounded-2xl bg-background/40 border border-border/50">
              <h4 className="text-white font-medium mb-1">Knowledge Base</h4>
-             <p className="text-2xl font-mono text-primary font-bold">24 <span className="text-sm font-sans font-normal text-muted-foreground">docs</span></p>
+             <p className="text-2xl font-mono text-primary font-bold">0 <span className="text-sm font-sans font-normal text-muted-foreground">docs</span></p>
           </div>
           <div className="p-5 rounded-2xl bg-background/40 border border-border/50">
              <h4 className="text-white font-medium mb-1">Recent Queries</h4>
-             <p className="text-2xl font-mono text-[#EBAA62] font-bold">128</p>
+             <p className="text-2xl font-mono text-[#EBAA62] font-bold">0</p>
           </div>
         </div>
       </div>
       <div className="space-y-4">
         <h3 className="font-medium text-white mb-4">Active Workflows</h3>
-        {['Syllabus & Notes', 'Campus Information', 'Timetable & Exams'].map((w, i) => (
-          <div key={i} className="flex items-center justify-between p-4 rounded-xl bg-background/40 border border-border/50 hover:bg-background/60 cursor-pointer transition-colors">
-             <span className="text-sm text-white font-medium">{w}</span>
-             <ArrowRight size={14} className="text-muted-foreground" />
-          </div>
-        ))}
+        <div className="text-sm text-muted-foreground p-4 bg-background/40 rounded-xl border border-border/50 text-center">
+           No active workflows. Upload a document to trigger a workflow.
+        </div>
       </div>
     </div>
   </PageLayout>
@@ -486,90 +728,160 @@ const Chat = () => {
   );
 };
 
-const KnowledgeBase = () => (
-  <PageLayout title="Knowledge Base">
-    <div className="flex justify-between items-center mb-8">
-      <div className="flex gap-2">
-        {['All Documents', 'Syllabi', 'Official Notices', 'Study Material'].map((tab, i) => (
-          <button key={i} className={`px-4 py-2 rounded-full text-sm font-medium ${i === 0 ? 'bg-primary text-white shadow-[0_0_15px_rgba(197,111,67,0.3)]' : 'bg-background/40 text-muted-foreground hover:text-white border border-border/50'}`}>
-            {tab}
-          </button>
-        ))}
+const KnowledgeBase = () => {
+  const [documents, setDocuments] = useState<{name: string; type: string; date: string}[]>([]);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const file = e.target.files[0];
+      setDocuments(prev => [{
+        name: file.name,
+        type: 'Uploaded Document',
+        date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+      }, ...prev]);
+    }
+  };
+
+  return (
+    <PageLayout title="Knowledge Base">
+      <div className="flex justify-between items-center mb-8">
+        <div className="flex gap-2">
+          {['All Documents', 'Syllabi', 'Official Notices', 'Study Material'].map((tab, i) => (
+            <button key={i} className={`px-4 py-2 rounded-full text-sm font-medium ${i === 0 ? 'bg-primary text-white shadow-[0_0_15px_rgba(197,111,67,0.3)]' : 'bg-background/40 text-muted-foreground hover:text-white border border-border/50'}`}>
+              {tab}
+            </button>
+          ))}
+        </div>
+        <input 
+          type="file" 
+          ref={fileInputRef} 
+          style={{ display: 'none' }} 
+          onChange={handleUpload}
+        />
+        <button 
+          onClick={() => fileInputRef.current?.click()}
+          className="flex items-center gap-2 bg-white text-[#15110E] px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-200 transition-colors"
+        >
+          <Upload size={16} /> Upload Data
+        </button>
       </div>
-      <button className="flex items-center gap-2 bg-white text-[#15110E] px-4 py-2 rounded-lg text-sm font-semibold hover:bg-gray-200 transition-colors">
-        <Upload size={16} /> Upload Data
-      </button>
-    </div>
-    
-    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-       {[
-         { name: 'Data_Structures_Syllabus_2024.pdf', type: 'Syllabus', date: 'Oct 12, 2024' },
-         { name: 'CN_Unit3_Notes.pdf', type: 'Study Material', date: 'Oct 10, 2024' },
-         { name: 'End_Sem_Exam_Schedule_Final.pdf', type: 'Official Notice', date: 'Oct 08, 2024' },
-         { name: 'OS_Lecture_Slides_1-5.pptx', type: 'Study Material', date: 'Oct 05, 2024' },
-         { name: 'Library_Access_Rules.docx', type: 'Official Notice', date: 'Oct 01, 2024' },
-       ].map((doc, i) => (
-         <div key={i} className="bg-background/40 border border-border/50 rounded-xl p-5 hover:border-primary/40 transition-all cursor-pointer group">
-            <div className="w-10 h-10 rounded-lg bg-card/80 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
-              <FileText size={18} className="text-primary" />
-            </div>
-            <h4 className="text-sm font-semibold text-white mb-1 truncate">{doc.name}</h4>
-            <div className="flex justify-between items-center text-xs text-muted-foreground mt-4">
-              <span className="bg-card px-2 py-1 rounded border border-border/40">{doc.type}</span>
-              <span>{doc.date}</span>
-            </div>
-         </div>
-       ))}
-    </div>
-  </PageLayout>
-);
+      
+      {documents.length === 0 ? (
+        <div className="text-center py-20 text-muted-foreground border border-dashed border-border/50 rounded-2xl">
+          <FileText size={48} className="mx-auto mb-4 opacity-50" />
+          <p>No documents found.</p>
+          <p className="text-sm">Upload notes or syllabi to get started.</p>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+           {documents.map((doc, i) => (
+             <div key={i} className="bg-background/40 border border-border/50 rounded-xl p-5 hover:border-primary/40 transition-all cursor-pointer group">
+                <div className="w-10 h-10 rounded-lg bg-card/80 flex items-center justify-center mb-4 group-hover:bg-primary/20 transition-colors">
+                  <FileText size={18} className="text-primary" />
+                </div>
+                <h4 className="text-sm font-semibold text-white mb-1 truncate">{doc.name}</h4>
+                <div className="flex justify-between items-center text-xs text-muted-foreground mt-4">
+                  <span className="bg-card px-2 py-1 rounded border border-border/40">{doc.type}</span>
+                  <span>{doc.date}</span>
+                </div>
+             </div>
+           ))}
+        </div>
+      )}
+    </PageLayout>
+  );
+};
 
 const Timetable = () => (
   <PageLayout title="Timetable & Conflict Detection">
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <div className="lg:col-span-2 bg-background/40 border border-border/50 rounded-2xl p-6">
          <h3 className="font-semibold text-white mb-6">Upcoming Schedule</h3>
-         <div className="space-y-4">
-            {[
-              { time: '09:00 AM - 10:30 AM', course: 'Data Structures (CS201)', location: 'Room 304' },
-              { time: '11:00 AM - 12:30 PM', course: 'Computer Networks (CS305)', location: 'Lab 2' },
-              { time: '02:00 PM - 03:30 PM', course: 'Operating Systems (CS302)', location: 'Room 101' },
-            ].map((slot, i) => (
-              <div key={i} className="flex gap-4 items-start p-4 rounded-xl bg-card/40 border border-border/30">
-                <div className="w-24 shrink-0">
-                  <span className="text-xs font-mono text-muted-foreground block">{slot.time.split('-')[0]}</span>
-                </div>
-                <div className="w-1 h-12 bg-primary/30 rounded-full"></div>
-                <div>
-                  <h4 className="text-sm font-semibold text-white">{slot.course}</h4>
-                  <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-                    <Clock size={12} /> {slot.time} • {slot.location}
-                  </p>
-                </div>
-              </div>
-            ))}
+         <div className="text-center py-10 text-muted-foreground border border-dashed border-border/30 rounded-xl">
+            <Calendar size={32} className="mx-auto mb-3 opacity-50" />
+            <p>Your schedule is clear.</p>
+            <p className="text-xs mt-1">Upload your timetable document to sync classes.</p>
          </div>
       </div>
       <div className="bg-background/40 border border-border/50 rounded-2xl p-6">
          <h3 className="font-semibold text-white mb-4">Conflict Detector</h3>
-         <div className="bg-primary/10 border border-primary/20 rounded-xl p-4 mb-4">
-            <div className="flex items-start gap-3">
-               <Calendar size={18} className="text-primary shrink-0 mt-0.5" />
-               <div>
-                  <h4 className="text-sm font-semibold text-white mb-1">Mid-Term Clash Detected</h4>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    OS (CS302) and Networks (CS305) exams are both scheduled for Oct 24th at 10:00 AM in the official notice.
-                  </p>
-               </div>
-            </div>
+         <div className="text-center py-8 text-muted-foreground text-sm border border-dashed border-border/30 rounded-xl">
+            No conflicts detected.
          </div>
-         <button className="w-full py-2 bg-card border border-border rounded-lg text-sm text-white hover:bg-card/80 transition-colors">
-            View Official Notice
-         </button>
       </div>
     </div>
   </PageLayout>
 );
+
+const Forum = () => {
+  const [posts, setPosts] = useState<{title: string, author: string, comments: number, content: string}[]>([]);
+  const [newTitle, setNewTitle] = useState('');
+  const [newContent, setNewContent] = useState('');
+
+  const handlePost = () => {
+    if (newTitle && newContent) {
+      setPosts(prev => [{
+        title: newTitle,
+        author: 'You',
+        comments: 0,
+        content: newContent
+      }, ...prev]);
+      setNewTitle('');
+      setNewContent('');
+    }
+  };
+
+  return (
+    <PageLayout title="Campus Discussion Forum">
+      <div className="mb-8 bg-card/60 border border-border/50 p-6 rounded-2xl">
+        <h3 className="font-semibold text-white mb-4">Start a discussion</h3>
+        <input 
+          type="text" 
+          placeholder="Topic Title" 
+          className="w-full bg-background border border-border/50 rounded-lg px-4 py-2 mb-3 text-white focus:outline-none focus:border-primary/50"
+          value={newTitle}
+          onChange={e => setNewTitle(e.target.value)}
+        />
+        <textarea 
+          placeholder="What do you want to discuss?" 
+          className="w-full bg-background border border-border/50 rounded-lg px-4 py-3 mb-4 text-white focus:outline-none focus:border-primary/50 min-h-[80px]"
+          value={newContent}
+          onChange={e => setNewContent(e.target.value)}
+        />
+        <button 
+          onClick={handlePost}
+          className="bg-primary text-white px-6 py-2 rounded-lg font-medium hover:bg-[#A85B33] transition-colors"
+        >
+          Post Topic
+        </button>
+      </div>
+
+      <div className="space-y-4">
+        {posts.length === 0 ? (
+          <div className="text-center py-16 text-muted-foreground border border-dashed border-border/50 rounded-2xl">
+            <MessageSquare size={40} className="mx-auto mb-4 opacity-50" />
+            <p>No discussions yet.</p>
+            <p className="text-sm">Be the first to start a conversation!</p>
+          </div>
+        ) : (
+          posts.map((post, i) => (
+            <div key={i} className="bg-background/40 border border-border/50 rounded-xl p-5 hover:border-primary/40 transition-all cursor-pointer">
+              <h4 className="text-lg font-semibold text-white mb-2">{post.title}</h4>
+              <p className="text-sm text-muted-foreground mb-4">{post.content}</p>
+              <div className="flex items-center gap-4 text-xs text-muted-foreground">
+                <span className="text-primary font-medium">{post.author}</span>
+                <div className="flex items-center gap-1">
+                  <MessageCircle size={14} /> {post.comments} Comments
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+      </div>
+    </PageLayout>
+  );
+};
 
 // App shell wrapper to allow seamless voice assistant on all screens
 const AppShell = ({ children }: { children: React.ReactNode }) => {
@@ -585,13 +897,14 @@ const AppShell = ({ children }: { children: React.ReactNode }) => {
         <div className="fixed top-0 left-0 right-0 z-40 bg-background/60 backdrop-blur-xl border-b border-border/50 h-16 flex items-center px-6 justify-between">
           <Link to="/" className="flex items-center gap-2">
             <RoenLogo className="h-8 w-11" />
-            <span className="font-display font-bold text-white tracking-tight hidden md:block">RoenRiviera</span>
+            <span className="font-display font-bold text-white tracking-tight hidden md:block">Riviera</span>
           </Link>
           <div className="flex gap-6">
              <Link to="/dashboard" className={`text-sm font-medium transition-colors ${location.pathname === '/dashboard' ? 'text-primary' : 'text-muted-foreground hover:text-white'}`}>Dashboard</Link>
              <Link to="/chat" className={`text-sm font-medium transition-colors ${location.pathname === '/chat' ? 'text-primary' : 'text-muted-foreground hover:text-white'}`}>Chat</Link>
              <Link to="/knowledge" className={`text-sm font-medium transition-colors ${location.pathname === '/knowledge' ? 'text-primary' : 'text-muted-foreground hover:text-white'}`}>Knowledge Base</Link>
              <Link to="/timetable" className={`text-sm font-medium transition-colors ${location.pathname === '/timetable' ? 'text-primary' : 'text-muted-foreground hover:text-white'}`}>Timetable</Link>
+             <Link to="/forum" className={`text-sm font-medium transition-colors ${location.pathname === '/forum' ? 'text-primary' : 'text-muted-foreground hover:text-white'}`}>Forum</Link>
           </div>
           <div className="flex items-center gap-4">
              <Settings size={18} className="text-muted-foreground hover:text-white cursor-pointer" />
@@ -618,6 +931,7 @@ function App() {
           <Route path="/chat" element={<Chat />} />
           <Route path="/knowledge" element={<KnowledgeBase />} />
           <Route path="/timetable" element={<Timetable />} />
+          <Route path="/forum" element={<Forum />} />
         </Routes>
       </AppShell>
     </BrowserRouter>

@@ -1,12 +1,88 @@
+"""
+Dual-LLM routing pipeline.
+
+• Simple queries (greetings, chitchat, general knowledge) → Gemini (fast)
+• Complex queries (syllabus RAG, timetable, summarisation) → Groq via LangGraph
+
+The classify_query() function is a lightweight, rule-based router so it
+adds effectively zero latency.  It can be upgraded to an LLM-based
+classifier later without changing the rest of the pipeline.
+"""
+
+import re
+import time
 import httpx
 from typing import Optional, Dict, Any, List
 from app.core.config import settings
 from google import genai
 from google.genai import types
 
+
+# ──────────────────────────────────────────────────────────────────────
+# Query classification (router)
+# ──────────────────────────────────────────────────────────────────────
+
+# Keywords / patterns that indicate a *complex* query requiring RAG or
+# structured campus data.  Kept as compiled regexes for speed.
+_COMPLEX_PATTERNS = re.compile(
+    r"\b("
+    r"syllabus|curriculum|course|module|subject|semester|exam|midterm|final"
+    r"|timetable|schedule|conflict|class(?:es)?|lecture|lab|tutorial"
+    r"|library|campus|facility|hostel|canteen|office|hours|contact"
+    r"|summarize|summary|explain|describe|detail|overview"
+    r"|attendance|grade|gpa|cgpa|marks|result"
+    r"|fee|payment|scholarship|deadline"
+    r"|professor|faculty|hod|dean|department"
+    r"|placement|internship|company|recruitment"
+    r"|club|event|fest|hackathon|workshop|seminar"
+    r")\b",
+    re.IGNORECASE,
+)
+
+# Greetings / chitchat patterns that should stay on the fast Gemini path
+_SIMPLE_PATTERNS = re.compile(
+    r"^(hi|hello|hey|good\s+(morning|afternoon|evening)|thanks|thank\s*you"
+    r"|bye|goodbye|how\s+are\s+you|what'?s?\s+up|yo|sup|hola)\b",
+    re.IGNORECASE,
+)
+
+
+def classify_query(query: str) -> str:
+    """
+    Classify a user query as 'simple' or 'complex'.
+
+    Returns
+    -------
+    str
+        ``"simple"`` → fast Gemini pipeline
+        ``"complex"`` → Groq / LangGraph pipeline
+    """
+    stripped = query.strip()
+
+    # Very short greetings / chitchat → always simple
+    if _SIMPLE_PATTERNS.search(stripped):
+        return "simple"
+
+    # Contains campus / academic keywords → complex
+    if _COMPLEX_PATTERNS.search(stripped):
+        return "complex"
+
+    # Fallback: short queries (≤ 8 words) without keywords → simple
+    if len(stripped.split()) <= 8:
+        return "simple"
+
+    # Longer free-text → treat as complex (might need RAG)
+    return "complex"
+
+
+# ──────────────────────────────────────────────────────────────────────
+# LLM provider classes (unchanged from original, kept for fallback)
+# ──────────────────────────────────────────────────────────────────────
+
 class LLMProvider:
     async def generate_response(self, prompt: str, context: str) -> str:
         raise NotImplementedError
+
 
 class GeminiProvider(LLMProvider):
     def __init__(self):
@@ -27,6 +103,7 @@ class GeminiProvider(LLMProvider):
             )
         )
         return response.text
+
 
 class GroqProvider(LLMProvider):
     def __init__(self):
@@ -58,33 +135,81 @@ class GroqProvider(LLMProvider):
             data = response.json()
             return data["choices"][0]["message"]["content"]
 
-async def generate_rag_response(prompt: str, context: str) -> str:
-    """Primary LLM pipeline with fallback support."""
-    primary_provider = settings.LLM_PROVIDER.lower()
-    
+
+# ──────────────────────────────────────────────────────────────────────
+# Simple-path Gemini response (fast, low-latency)
+# ──────────────────────────────────────────────────────────────────────
+
+async def _simple_gemini_response(prompt: str, context: str) -> str:
+    """Handle simple / conversational queries via Gemini."""
+    provider = GeminiProvider()
+    return await provider.generate_response(prompt, context)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Complex-path LangGraph / Groq response
+# ──────────────────────────────────────────────────────────────────────
+
+async def _complex_groq_response(prompt: str, context: str) -> str:
+    """
+    Invoke the RAG LangGraph for complex queries.
+    Falls back to raw GroqProvider if the graph raises.
+    """
     try:
-        if primary_provider == "gemini":
-            provider = GeminiProvider()
-            return await provider.generate_response(prompt, context)
-        elif primary_provider == "groq":
-            provider = GroqProvider()
-            return await provider.generate_response(prompt, context)
+        from app.rag.graph import rag_graph
+
+        initial_state = {
+            "query": prompt,
+            "context_chunks": [],
+            "context_text": context,
+            "answer": "",
+            "grounded": False,
+            "latency_ms": 0,
+        }
+
+        result = rag_graph.invoke(initial_state)
+        return result["answer"]
+
+    except Exception as graph_err:
+        print(f"[ROUTER] LangGraph RAG failed ({graph_err}), falling back to raw Groq")
+        provider = GroqProvider()
+        return await provider.generate_response(prompt, context)
+
+
+# ──────────────────────────────────────────────────────────────────────
+# Public API — drop-in replacement for the old generate_rag_response
+# ──────────────────────────────────────────────────────────────────────
+
+async def generate_rag_response(prompt: str, context: str) -> str:
+    """
+    Primary LLM pipeline with intelligent routing + fallback support.
+
+    1. Classify the query as *simple* or *complex*.
+    2. Simple  → fast Gemini response.
+       Complex → LangGraph / Groq pipeline.
+    3. If the chosen path fails and fallback is enabled, try the other.
+    """
+    classification = classify_query(prompt)
+    print(f"[ROUTER] Query classified as '{classification}': {prompt[:80]}...")
+
+    try:
+        if classification == "simple":
+            return await _simple_gemini_response(prompt, context)
         else:
-            return "Invalid LLM provider configured."
-    except Exception as e:
+            return await _complex_groq_response(prompt, context)
+
+    except Exception as primary_err:
         if settings.LLM_FALLBACK_ENABLED:
-            print(f"Primary LLM failed: {e}. Falling back...")
+            print(f"[ROUTER] Primary path failed: {primary_err}. Falling back...")
             try:
-                # If Gemini failed, try Groq
-                if primary_provider == "gemini":
-                    fallback = GroqProvider()
-                    return await fallback.generate_response(prompt, context)
-                # If Groq failed, try Gemini
-                elif primary_provider == "groq":
-                    fallback = GeminiProvider()
-                    return await fallback.generate_response(prompt, context)
-            except Exception as fallback_e:
-                print(f"Fallback LLM also failed: {fallback_e}")
+                if classification == "simple":
+                    # Gemini failed → try Groq
+                    return await _complex_groq_response(prompt, context)
+                else:
+                    # Groq failed → try Gemini
+                    return await _simple_gemini_response(prompt, context)
+            except Exception as fallback_err:
+                print(f"[ROUTER] Fallback also failed: {fallback_err}")
                 return "Service temporarily unavailable due to upstream LLM errors."
-        
+
         return "Service temporarily unavailable."

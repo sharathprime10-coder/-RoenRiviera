@@ -8,3 +8,9 @@ pyjwt
 httpx
 google-genai
 groq
+edge-tts
+langchain
+langchain-core
+langchain-groq
+langgraph
+openai

@@ -7,6 +7,7 @@ export const sendMessage = async (message: string, workflow: string) => {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        "Authorization": "Bearer dummy_token"
       },
       body: JSON.stringify({
         message,
@@ -23,7 +24,7 @@ export const sendMessage = async (message: string, workflow: string) => {
   } catch (error) {
     console.error("Error communicating with backend:", error);
     return { 
-      answer: "Sorry, there was an error connecting to the RoenRiviera service.",
+      answer: "Sorry, there was an error connecting to the Riviera service.",
       grounded: false,
       sources: []
     };
