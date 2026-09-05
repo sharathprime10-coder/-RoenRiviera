@@ -84,7 +84,6 @@ Create a `.env` file in the `backend` directory with your API keys:
 GEMINI_API_KEY="your_gemini_key"
 GROQ_API_KEY="your_groq_key"
 OPENROUTER_API_KEY="your_openrouter_key"
-VOICE_OPENROUTER_API_KEY="your_voice_openrouter_key"
 ```
 
 Start the backend server:

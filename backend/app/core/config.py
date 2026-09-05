@@ -18,8 +18,7 @@ class Settings(BaseSettings):
     GROQ_MODEL: str = "qwen/qwen3.8-27b"
     OPENROUTER_API_KEY: str = ""
 
-    # Voice Assistant - dedicated OpenRouter key (isolated from text chat pipeline)
-    VOICE_OPENROUTER_API_KEY: str = ""
+    # Voice Assistant - using the unified OpenRouter key
     VOICE_OPENROUTER_MODEL: str = "google/gemini-2.5-flash-lite"
 
     model_config = SettingsConfigDict(env_file=".env", env_ignore_empty=True, extra="ignore")

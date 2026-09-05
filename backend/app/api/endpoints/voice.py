@@ -46,10 +46,7 @@ async def _voice_simple_response(text: str) -> str:
     Handle simple / conversational voice queries via the dedicated
     OpenRouter key — completely isolated from the text-chat pipeline.
     """
-    api_key = settings.VOICE_OPENROUTER_API_KEY
-    if not api_key:
-        # Fallback to the shared OpenRouter key if voice-specific isn't set
-        api_key = settings.OPENROUTER_API_KEY
+    api_key = settings.OPENROUTER_API_KEY
     if not api_key:
         raise ValueError("No OpenRouter API key configured for voice.")
 
