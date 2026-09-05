@@ -27,6 +27,7 @@ class RAGState(TypedDict):
     answer: str
     grounded: bool
     latency_ms: int
+    memory_context: str
 
 
 class TimetableState(TypedDict):
@@ -115,12 +116,15 @@ def generate_rag_answer(state: RAGState) -> dict:
 
     llm = _get_groq_llm()
 
+    memory_note = f"\n\n{state.get('memory_context', '')}" if state.get('memory_context') else ""
+
     system_prompt = (
         "You are River, the intelligent campus assistant for RoenRiviera University. "
         "Answer the student's question using ONLY the context provided below. "
         "If the context does not contain enough information, say so honestly. "
         "Be concise, helpful, and cite the relevant document when possible.\n\n"
         f"### Context\n{state['context_text']}"
+        f"{memory_note}"
     )
 
     messages = [
