@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     # Supabase
     SUPABASE_URL: str = ""
     SUPABASE_SERVICE_ROLE_KEY: str = ""
+    SUPABASE_JWT_SECRET: str = ""
     
     # LLM Providers
     LLM_PROVIDER: str = "gemini" # gemini or groq
